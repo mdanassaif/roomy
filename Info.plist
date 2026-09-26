@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>CFBundleName</key><string>Roomy</string>
+  <key>CFBundleDisplayName</key><string>Roomy</string>
+  <key>CFBundleIdentifier</key><string>app.roomy.Roomy</string>
+  <key>CFBundleExecutable</key><string>Roomy</string>
+  <key>CFBundlePackageType</key><string>APPL</string>
+  <key>CFBundleShortVersionString</key><string>1.0</string>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSApplicationCategoryType</key><string>public.app-category.utilities</string>
+  <key>NSHighResolutionCapable</key><true/>
+  <key>NSAppleEventsUsageDescription</key><string>Roomy asks Finder to empty the Trash and System Events to manage login items.</string>
+  <key>NSDesktopFolderUsageDescription</key><string>Roomy measures your Desktop to show what takes space.</string>
+  <key>NSDocumentsFolderUsageDescription</key><string>Roomy measures your Documents to show what takes space.</string>
+  <key>NSDownloadsFolderUsageDescription</key><string>Roomy measures your Downloads to find old installers.</string>
+</dict>
+</plist>
