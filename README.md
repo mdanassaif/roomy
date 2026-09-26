@@ -4,6 +4,8 @@ A native macOS app to see what's filling your disk, clean it up safely, and keep
 
 Built with SwiftUI. It's free, open source and runs entirely on your Mac.
 
+![Roomy overview](docs/screenshot.png)
+
 ## Features
 
 - **Cleanup queue, not a delete button.** Stage things from any screen. A bar floats over the app showing how much space you'll free and what your free space looks like afterwards. Review every item, then move the lot to the Trash.
