@@ -14,6 +14,8 @@ struct OverviewRoom: View {
                 RoomHeader(room: .overview, subtitle: "Macintosh HD at a glance") { EmptyView() }
 
                 VStack(spacing: 16) {
+                    SmartCleanCard()
+                    if !model.hasFullDiskAccess { FullDiskAccessCard() }
                     Card {
                         VStack(alignment: .leading, spacing: 12) {
                             HStack(alignment: .firstTextBaseline) {
@@ -26,7 +28,7 @@ struct OverviewRoom: View {
                             DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 18)
                             HStack(spacing: 16) {
                                 legend(.purple, "Used \(fmt(model.volume.used))")
-                                if model.queuedBytes > 0 { legend(.green, "Staged \(fmt(model.queuedBytes))") }
+                                if model.queuedBytes > 0 { legend(.green, "To clean \(fmt(model.queuedBytes))") }
                                 legend(.secondary.opacity(0.3), "Free \(fmt(model.volume.free))")
                             }
                             .font(.caption)
@@ -42,8 +44,8 @@ struct OverviewRoom: View {
                                     Text("\(model.trashCount) items").font(.caption).foregroundStyle(.secondary)
                                 } else {
                                     Text("Size hidden").font(.title3.bold())
-                                    Button("Grant Full Disk Access to see it") { openFullDiskAccess() }
-                                        .buttonStyle(.link).font(.caption)
+                                    Text("Turn on Full Disk Access (above) to see it. Emptying still works.")
+                                        .font(.caption).foregroundStyle(.secondary)
                                 }
                                 Button(role: .destructive) { confirmEmpty = true } label: {
                                     Label("Empty Trash", systemImage: "trash.slash")
@@ -68,9 +70,12 @@ struct OverviewRoom: View {
                                         Text("Find what's taking space").foregroundStyle(.secondary)
                                     }
                                     HStack {
-                                        Button("Home") { model.startScan(NSHomeDirectory()) }.buttonStyle(.borderedProminent)
-                                        Button("Entire Disk") { model.startScan("/") }
-                                        Button("Folder…") { pickFolder() }
+                                        Button("Scan My Files") { model.startScan(NSHomeDirectory()) }
+                                            .buttonStyle(.borderedProminent)
+                                            .help("Your Home folder: documents, downloads, app data. The fastest scan.")
+                                        Button("Whole Mac") { model.startScan("/") }
+                                            .help("Everything, including apps and macOS. Takes longer.")
+                                        Button("A Folder…") { pickFolder() }
                                     }
                                 }
                             }
@@ -87,17 +92,27 @@ struct OverviewRoom: View {
                                 }
                                 ForEach(root.children.prefix(8)) { c in
                                     HStack {
-                                        FileIcon(path: c.path, aggregate: c.isAggregate)
-                                        Button(c.name) { if c.isDir { model.open(c) } }
-                                            .buttonStyle(.plain)
-                                            .lineLimit(1)
+                                        FileIcon(path: c.path, aggregate: c.isAggregate, size: 22)
+                                        Button { if c.isDir { model.open(c) } } label: {
+                                            VStack(alignment: .leading, spacing: 1) {
+                                                HStack(spacing: 6) {
+                                                    Text(c.name).lineLimit(1)
+                                                    if let a = Advisor.explain(c.path, name: c.name) { AdviceBadge(advice: a) }
+                                                }
+                                                if let a = Advisor.explain(c.path, name: c.name) {
+                                                    Text(a.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                                                }
+                                            }
+                                            .contentShape(Rectangle())
+                                        }
+                                        .buttonStyle(.plain)
                                         Spacer()
                                         SizeBar(fraction: Double(c.size) / Double(max(root.size, 1)))
                                         Text(fmt(c.size)).monospacedDigit().frame(width: 80, alignment: .trailing)
                                         if !c.isAggregate {
                                             StageButton(path: c.path, name: c.name, size: c.size, source: "Overview")
                                         } else {
-                                            Color.clear.frame(width: 16)
+                                            Color.clear.frame(width: 70)
                                         }
                                     }
                                 }
@@ -113,8 +128,6 @@ struct OverviewRoom: View {
                                 Text("Scanning happens on this Mac. No account, no sync, no analytics. The only network calls are update checks, and only when you press Check.")
                                     .font(.caption).foregroundStyle(.secondary)
                             }
-                            Spacer()
-                            Button("Full Disk Access…") { openFullDiskAccess() }
                         }
                     }
                 }
@@ -151,7 +164,7 @@ struct StorageRoom: View {
     var body: some View {
         let _ = model.treeVersion
         VStack(spacing: 0) {
-            RoomHeader(room: .storage, subtitle: model.root == nil ? "Where your space went" : "Click a block to go inside it. Press + to stage it for cleanup") {
+            RoomHeader(room: .storage, subtitle: model.root == nil ? "Where your space went" : "Click to look inside. Press Add on anything you don't need; nothing is deleted until you review") {
                 if model.root != nil {
                     Button { model.startScan() } label: { Label("Rescan", systemImage: "arrow.clockwise") }
                         .disabled(model.scanning)
@@ -206,8 +219,15 @@ struct StorageRoom: View {
                 HStack(spacing: 10) {
                     FileIcon(path: c.path, aggregate: c.isAggregate, size: 22)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(c.name).lineLimit(1).truncationMode(.middle)
-                        if c.isDir { Text("\(c.items.formatted()) files").font(.caption).foregroundStyle(.secondary) }
+                        HStack(spacing: 6) {
+                            Text(c.name).lineLimit(1).truncationMode(.middle)
+                            if let a = Advisor.explain(c.path, name: c.name) { AdviceBadge(advice: a) }
+                        }
+                        if let a = Advisor.explain(c.path, name: c.name) {
+                            Text(a.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        } else if c.isDir {
+                            Text("\(c.items.formatted()) files").font(.caption).foregroundStyle(.secondary)
+                        }
                     }
                     Spacer()
                     Text(String(format: "%.1f%%", Double(c.size) / Double(max(parent.size, 1)) * 100))
@@ -219,14 +239,14 @@ struct StorageRoom: View {
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if c.isAggregate { Color.clear.frame(width: 16) } else {
+            if c.isAggregate { Color.clear.frame(width: 70) } else {
                 StageButton(path: c.path, name: c.name, size: c.size, source: "Storage")
             }
         }
         .padding(.vertical, 2)
         .contextMenu {
             if !c.isAggregate {
-                Button("Add to Cleanup Queue") { model.stage(c) }
+                Button("Add to Clean List") { model.stage(c) }
                 Button("Reveal in Finder") { reveal(c.path) }
             }
         }
@@ -242,17 +262,14 @@ struct CleanRoom: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RoomHeader(room: .clean, subtitle: "Safe-to-remove leftovers. Nothing is deleted until you review the queue") {
+            RoomHeader(room: .clean, subtitle: "Leftovers that are safe to remove. Nothing is deleted until you review your clean list") {
                 if model.cleanLoading { ProgressView().controlSize(.small) }
                 Button { model.refreshClean() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
                     .disabled(model.cleanLoading)
-                Button("Stage Everything") {
-                    for c in Cleaners.all where c.id != "olddownloads" && c.id != "archives" {
-                        for i in model.cleanResults[c.id] ?? [] { model.stage(path: i.url.path, name: i.name, size: i.size, source: c.title) }
-                    }
-                }
-                .disabled(model.cleanResults.isEmpty)
-                .help("Stages everything except Archives and Old downloads, which you should look through yourself")
+                Button("Add All Safe Items") { model.stageSmart(review: false) }
+                    .buttonStyle(.borderedProminent)
+                    .disabled(model.smartBytes == 0)
+                    .help("Adds caches, logs, build files and installers. Leaves out project dependencies, archives and old downloads, which you should look at yourself.")
             }
             List {
                 HStack(spacing: 12) {
@@ -297,7 +314,7 @@ struct CleanRoom: View {
                                 Text(items.isEmpty ? "Nothing" : fmt(total)).monospacedDigit()
                                     .foregroundStyle(items.isEmpty ? .secondary : .primary)
                             }
-                            Button(stagedAll ? "Staged" : "Stage") {
+                            Button(stagedAll ? "Added" : "Add All") {
                                 if stagedAll { items.forEach { model.unstage($0.url.path) } }
                                 else { items.forEach { model.stage(path: $0.url.path, name: $0.name, size: $0.size, source: cat.title) } }
                             }
@@ -360,7 +377,10 @@ struct LargeFilesRoom: View {
                         HStack(spacing: 10) {
                             FileIcon(path: f.path, size: 26)
                             VStack(alignment: .leading, spacing: 1) {
-                                Text(f.name).lineLimit(1).truncationMode(.middle)
+                                HStack(spacing: 6) {
+                                    Text(f.name).lineLimit(1).truncationMode(.middle)
+                                    if let a = Advisor.explain(f.path, name: f.name) { AdviceBadge(advice: a) }
+                                }
                                 Text(f.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
                                     .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                             }
@@ -380,6 +400,83 @@ struct LargeFilesRoom: View {
                 }
             } else {
                 EmptyScanPrompt()
+            }
+        }
+    }
+}
+
+// MARK: - Guided cards
+
+struct SmartCleanCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        let bytes = model.smartBytes
+        HStack(spacing: 16) {
+            Image(systemName: "sparkles")
+                .font(.system(size: 26, weight: .semibold))
+                .foregroundStyle(.white)
+                .frame(width: 56, height: 56)
+                .background(LinearGradient(colors: [.green, .teal], startPoint: .topLeading, endPoint: .bottomTrailing),
+                            in: RoundedRectangle(cornerRadius: 14))
+            VStack(alignment: .leading, spacing: 4) {
+                if model.cleanLoading && bytes == 0 {
+                    Text("Looking for things you can safely remove…").font(.title3.bold())
+                    ProgressView().controlSize(.small)
+                } else if bytes > 0 {
+                    Text("You can free up \(fmt(bytes)) safely").font(.title3.bold())
+                    Text(model.smartItems.sorted { a, b in a.items.reduce(0) { $0 + $1.size } > b.items.reduce(0) { $0 + $1.size } }
+                            .prefix(4)
+                            .map { "\($0.category.title) \(fmt($0.items.reduce(0) { $0 + $1.size }))" }
+                            .joined(separator: " · "))
+                        .font(.callout).foregroundStyle(.secondary).lineLimit(1)
+                    Text("Only caches, logs, build files and installers: things that come back by themselves or aren't needed.")
+                        .font(.caption).foregroundStyle(.tertiary)
+                } else {
+                    Text("Nothing obvious to clean").font(.title3.bold())
+                    Text("Look through Storage or Large Files for big things you don't need.").font(.callout).foregroundStyle(.secondary)
+                }
+            }
+            Spacer()
+            if bytes > 0 {
+                Button { model.stageSmart() } label: {
+                    Text("Review & Free Up \(fmt(bytes))").padding(.horizontal, 6)
+                }
+                .buttonStyle(.borderedProminent)
+                .tint(.green)
+                .controlSize(.large)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(Color.green.opacity(0.08), in: RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).strokeBorder(Color.green.opacity(0.25)))
+    }
+}
+
+struct FullDiskAccessCard: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        Card {
+            HStack(alignment: .top, spacing: 14) {
+                Image(systemName: "hand.raised.fill").font(.title2).foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Let Roomy see everything").font(.headline)
+                    Text("macOS hides some folders, like the Trash and Mail, until you allow it. Without this, some sizes show up smaller.")
+                        .font(.callout).foregroundStyle(.secondary)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("1. Click **Open Settings**")
+                        Text("2. Switch on **Roomy** (or press **+** and pick it from Applications)")
+                        Text("3. Come back and click **Relaunch Roomy**")
+                    }
+                    .font(.callout)
+                    HStack {
+                        Button("Open Settings") { openFullDiskAccess() }.buttonStyle(.borderedProminent)
+                        Button("Relaunch Roomy") { model.relaunch() }
+                        Button("Check Again") { model.refreshTrash() }.buttonStyle(.link)
+                    }
+                }
             }
         }
     }

@@ -45,6 +45,7 @@ struct ContentView: View {
                     } icon: {
                         Image(systemName: r.icon).foregroundStyle(r.color)
                     }
+                    .badge(badge(for: r))
                     .tag(r)
                 }
             }
@@ -80,7 +81,15 @@ struct ContentView: View {
             }
             .overlay(alignment: .top) {
                 if let t = model.toast {
-                    Text(t)
+                    HStack(spacing: 12) {
+                        Text(t.text)
+                        if t.canUndo {
+                            Button("Undo") { model.undoTrash() }
+                                .buttonStyle(.borderedProminent)
+                                .controlSize(.small)
+                                .keyboardShortcut("z", modifiers: .command)
+                        }
+                    }
                         .padding(.horizontal, 16).padding(.vertical, 10)
                         .background(.regularMaterial, in: Capsule())
                         .shadow(radius: 8)
@@ -110,6 +119,20 @@ struct ContentView: View {
         .onAppear {
             model.applyAppearance()
             model.refreshTrash()
+            model.autoStart()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            model.refreshTrash()
+            model.volume = .current()
+        }
+    }
+
+    func badge(for r: Room) -> Text? {
+        switch r {
+        case .clean where model.smartBytes > 0: Text(fmt(model.smartBytes))
+        case .apps where !model.sparkleUpdates.isEmpty || !model.brewOutdated.isEmpty:
+            Text("\(model.sparkleUpdates.count + model.brewOutdated.count)")
+        default: nil
         }
     }
 }

@@ -48,11 +48,18 @@ enum Cleaners {
                           resolve: contents(home + "/Library/Developer/CoreSimulator/Caches")),
             CleanCategory(id: "pkgcaches", title: "Package manager caches", detail: "npm, pnpm, bun, gradle and pip caches, downloaded again when needed", icon: "cube.box",
                           resolve: {
-                              [home + "/.npm/_cacache", home + "/Library/pnpm/store", home + "/.bun/install/cache",
+                              [home + "/.npm/_cacache", home + "/.npm/_npx", home + "/.npm/_logs", home + "/Library/pnpm/store", home + "/.bun/install/cache",
                                home + "/.gradle/caches", home + "/.cache/pip", home + "/.cargo/registry/cache"]
                                   .filter { fm.fileExists(atPath: $0) }.map { URL(fileURLWithPath: $0) }
                           },
                           name: { $0.path.replacingOccurrences(of: home, with: "~") }),
+            CleanCategory(id: "toolcache", title: "Command-line tool caches", detail: "Things in ~/.cache from dev tools; they download again when needed", icon: "terminal",
+                          resolve: {
+                              // AI model folders are big deliberate downloads, so leave those out.
+                              let keep: Set<String> = ["huggingface", "lm-studio", "whisper", "torch"]
+                              return contents(home + "/.cache")().filter { !keep.contains($0.lastPathComponent) }
+                          },
+                          name: { "~/.cache/" + $0.lastPathComponent }),
             CleanCategory(id: "deps", title: "Project dependencies", detail: "node_modules, .next and .turbo folders; run npm install to get them back", icon: "folder.badge.gearshape",
                           resolve: findDeps,
                           name: { $0.deletingLastPathComponent().lastPathComponent + "/" + $0.lastPathComponent }),

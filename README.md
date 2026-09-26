@@ -8,6 +8,9 @@ Built with SwiftUI. It's free, open source and runs entirely on your Mac.
 
 ## Features
 
+- **One click to free up space.** Roomy finds caches, logs, build files and installers on its own and tells you how much you can free safely. Press *Review & Free Up*, check the list, done.
+- **Every folder explains itself.** Badges like *Safe to remove*, *Rebuilds itself*, *Check first* and *Keep*, with a one-line note on what `.npm`, `.cache`, `Library` or `node_modules` actually are.
+- **Undo.** Changed your mind after cleaning? Press Undo (⌘Z) and everything goes back where it was.
 - **Cleanup queue, not a delete button.** Stage things from any screen. A bar floats over the app showing how much space you'll free and what your free space looks like afterwards. Review every item, then move the lot to the Trash.
 - **Storage map.** Scan your Home folder, the whole disk or any folder. A block map and a sorted list show where the space went. Click to go inside a folder.
 - **Quick Clean.** App caches, logs, Xcode DerivedData, Archives and Device Support, simulator caches, npm/pnpm/bun/pip caches, `node_modules`, `.next` and `.turbo` folders, installers and old files in Downloads.
@@ -42,15 +45,17 @@ Go to **System Settings → Privacy & Security → Full Disk Access** and add **
 
 ## Quick start
 
-1. **Quick Clean → Stage Everything.** Archives and old downloads are left out for you to check yourself.
-2. Click **Review…** in the bar at the bottom and remove anything you want to keep.
-3. Tick **Also empty the Trash afterwards** to get the space back straight away, then confirm.
+1. Open Roomy. It scans your files and finds what's safe to clean without being asked.
+2. Press **Review & Free Up** on the Overview.
+3. Remove anything you want to keep, tick **Empty the Trash too** to get the space back straight away, then confirm.
+
+To dig deeper, open **Storage** or **Large Files** and press **Add** on anything you don't need.
 
 Moving things to the Trash doesn't free space until the Trash is emptied.
 
 ## Safety
 
-- Nothing is deleted without going through the review sheet.
+- Nothing is deleted without going through the review sheet, and moves to the Trash can be undone.
 - By default, items go to the Trash, where you can put them back.
 - System locations (`/System`, `/usr`, your Home, Library, Desktop, Documents and so on) and Apple apps are protected and can't be staged.
 
@@ -62,6 +67,7 @@ Sources/Roomy/
   Services.swift    clean categories, apps & updates, startup items, system monitor
   AppModel.swift    app state, cleanup queue, trash
   Components.swift  shared views, treemap
+  Guide.swift       plain-language explanations for known folders
   Rooms.swift       Overview, Storage, Quick Clean, Large Files
   Rooms2.swift      Applications, Snapshots, review sheet, settings
   RoomyApp.swift    app entry, window, menu bar monitor

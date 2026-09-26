@@ -175,7 +175,7 @@ struct AppsRoom: View {
                     Spacer()
                     Text(a.size.map(fmt) ?? "—").monospacedDigit().frame(width: 80, alignment: .trailing)
                     let staged = model.isQueued(a.path)
-                    Button(staged ? "Staged" : "Uninstall") {
+                    Button(staged ? "Added" : "Uninstall") {
                         if staged {
                             model.queue.removeAll { $0.source == "Uninstall" && ($0.path == a.path || $0.name.hasPrefix(a.name + ":")) }
                         } else {
@@ -184,7 +184,7 @@ struct AppsRoom: View {
                     }
                     .tint(staged ? .green : nil)
                     .disabled(a.bundleID.hasPrefix("com.apple."))
-                    .help("Stages the app and its support files, caches and preferences")
+                    .help("Adds the app plus its support files, caches and preferences to your clean list")
                 }
                 .padding(.vertical, 2)
                 .contextMenu { Button("Reveal in Finder") { reveal(a.path) } }
@@ -313,7 +313,7 @@ struct QueueBar: View {
                 .frame(width: 42, height: 42)
                 .background(Color.green.gradient, in: RoundedRectangle(cornerRadius: 10))
             VStack(alignment: .leading, spacing: 4) {
-                Text("\(model.queue.count) item\(model.queue.count == 1 ? "" : "s") staged · \(fmt(bytes))").font(.headline)
+                Text("Clean list: \(model.queue.count) item\(model.queue.count == 1 ? "" : "s") · \(fmt(bytes))").font(.headline)
                 HStack(spacing: 6) {
                     Text("Free \(fmt(model.volume.free))")
                     Image(systemName: "arrow.right").font(.caption2)
@@ -325,7 +325,7 @@ struct QueueBar: View {
             }
             Spacer()
             Button("Clear") { model.queue.removeAll() }
-            Button("Review…") { model.showReview = true }
+            Button("Review & Clean") { model.showReview = true }
                 .buttonStyle(.borderedProminent).tint(.green)
                 .keyboardShortcut(.return, modifiers: .command)
         }
@@ -341,16 +341,24 @@ struct ReviewSheet: View {
     @Environment(\.dismiss) private var dismiss
     @State private var emptyAfter = false
 
+    var groups: [(source: String, items: [QueueItem])] {
+        Dictionary(grouping: model.queue, by: \.source)
+            .map { ($0.key, $0.value.sorted { $0.size > $1.size }) }
+            .sorted { $0.1.reduce(0) { $0 + $1.size } > $1.1.reduce(0) { $0 + $1.size } }
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             VStack(alignment: .leading, spacing: 4) {
-                Text("Review cleanup").font(.title2.bold())
-                Text("These \(model.queue.count) items will be moved to the Trash. You can still put them back from there, until you empty it.")
+                Text("Ready to clean \(fmt(model.queuedBytes))").font(.title2.bold())
+                Text("These \(model.queue.count) items go to the Trash. Changed your mind? Press Undo afterwards, or put them back from the Trash.")
                     .foregroundStyle(.secondary)
             }
             .padding(20)
             List {
-                ForEach(model.queue.sorted { $0.size > $1.size }) { item in
+                ForEach(groups, id: \.source) { g in
+                  Section {
+                    ForEach(g.items) { item in
                     HStack {
                         FileIcon(path: item.path, size: 22)
                         VStack(alignment: .leading, spacing: 1) {
@@ -359,12 +367,19 @@ struct ReviewSheet: View {
                                 .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
                         }
                         Spacer()
-                        Text(item.source).font(.caption).padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Color.secondary.opacity(0.12), in: Capsule())
                         Text(fmt(item.size)).monospacedDigit().frame(width: 80, alignment: .trailing)
                         Button { model.unstage(item.path) } label: { Image(systemName: "xmark.circle.fill").foregroundStyle(.secondary) }
                             .buttonStyle(.borderless).help("Keep this one")
                     }
+                    }
+                  } header: {
+                    HStack {
+                        Text(g.source)
+                        Spacer()
+                        Text(fmt(g.items.reduce(0) { $0 + $1.size }))
+                        Button("Keep all") { g.items.forEach { model.unstage($0.path) } }.buttonStyle(.link)
+                    }
+                  }
                 }
             }
             .listStyle(.inset)
@@ -376,7 +391,12 @@ struct ReviewSheet: View {
                     Spacer()
                     Text("Free space: \(fmt(model.volume.free)) → \(fmt(model.volume.free + model.queuedBytes))").foregroundStyle(.secondary)
                 }
-                Toggle("Also empty the Trash afterwards (permanent, needed to actually get the space back)", isOn: $emptyAfter)
+                Toggle(isOn: $emptyAfter) {
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Empty the Trash too, so the space comes back right away")
+                        Text("Permanent. There's no Undo when this is on.").font(.caption).foregroundStyle(.secondary)
+                    }
+                }
                 HStack {
                     Spacer()
                     Button("Cancel") { dismiss() }.keyboardShortcut(.cancelAction)

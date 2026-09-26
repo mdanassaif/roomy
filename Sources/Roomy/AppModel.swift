@@ -36,6 +36,12 @@ enum Room: String, CaseIterable, Identifiable {
     }
 }
 
+struct Toast: Equatable {
+    let id = UUID()
+    let text: String
+    var canUndo = false
+}
+
 struct QueueItem: Identifiable, Hashable {
     var id: String { path }
     let path: String
@@ -66,7 +72,12 @@ final class AppModel {
     var queue: [QueueItem] = []
     var showReview = false
     var trashing = false
-    var toast: String?
+    var toast: Toast?
+    private var lastTrashed: [(from: String, to: URL)] = []
+    private var didAutoStart = false
+
+    /// True when Roomy can read protected folders like the Trash.
+    var hasFullDiskAccess = true
 
     // Trash
     var trashSize: Int64?
@@ -114,11 +125,52 @@ final class AppModel {
         }
     }
 
-    func flash(_ message: String) {
-        toast = message
-        DispatchQueue.main.asyncAfter(deadline: .now() + 3.5) { [weak self] in
-            if self?.toast == message { self?.toast = nil }
+    func flash(_ message: String, canUndo: Bool = false) {
+        let t = Toast(text: message, canUndo: canUndo)
+        toast = t
+        DispatchQueue.main.asyncAfter(deadline: .now() + (canUndo ? 8 : 3.5)) { [weak self] in
+            if self?.toast == t { self?.toast = nil }
         }
+    }
+
+    /// First launch of the window: measure the cleanable stuff and scan Home without being asked.
+    func autoStart() {
+        guard !didAutoStart else { return }
+        didAutoStart = true
+        refreshClean()
+        if root == nil { startScan(NSHomeDirectory()) }
+    }
+
+    func relaunch() {
+        let path = Bundle.main.bundlePath
+        let p = Process()
+        p.executableURL = URL(fileURLWithPath: "/bin/sh")
+        p.arguments = ["-c", "sleep 1; /usr/bin/open \"\(path)\""]
+        try? p.run()
+        NSApp.terminate(nil)
+    }
+
+    // MARK: Smart clean
+
+    /// Categories that are safe to clear without looking: they only hold things that get rebuilt or downloaded again.
+    static let smartCategories = ["caches", "logs", "derived", "simcaches", "pkgcaches", "toolcache", "installers"]
+
+    var smartItems: [(category: CleanCategory, items: [SizedItem])] {
+        Cleaners.all.filter { Self.smartCategories.contains($0.id) }.compactMap { c in
+            let items = cleanResults[c.id] ?? []
+            return items.isEmpty ? nil : (c, items)
+        }
+    }
+
+    var smartBytes: Int64 {
+        smartItems.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.size } }
+    }
+
+    func stageSmart(review: Bool = true) {
+        for (c, items) in smartItems {
+            for i in items { stage(path: i.url.path, name: i.name, size: i.size, source: c.title) }
+        }
+        if review && !queue.isEmpty { showReview = true }
     }
 
     // MARK: Scan
@@ -198,9 +250,12 @@ final class AppModel {
         DispatchQueue.global(qos: .userInitiated).async {
             var ok: [QueueItem] = []
             var failed: [String] = []
+            var moved: [(from: String, to: URL)] = []
             for it in items {
                 do {
-                    try FileManager.default.trashItem(at: URL(fileURLWithPath: it.path), resultingItemURL: nil)
+                    var out: NSURL?
+                    try FileManager.default.trashItem(at: URL(fileURLWithPath: it.path), resultingItemURL: &out)
+                    if let out { moved.append((it.path, out as URL)) }
                     ok.append(it)
                 } catch {
                     failed.append(it.name)
@@ -209,6 +264,7 @@ final class AppModel {
             if emptyAfter { Self.emptyTrashSync() }
             DispatchQueue.main.async {
                 self.trashing = false
+                self.lastTrashed = emptyAfter ? [] : moved
                 let okPaths = Set(ok.map(\.path))
                 self.queue.removeAll { okPaths.contains($0.path) }
                 for it in ok { self.removeFromTree(it.path) }
@@ -219,10 +275,29 @@ final class AppModel {
                 let freed = ok.reduce(0) { $0 + $1.size }
                 var msg = emptyAfter ? "Deleted \(ok.count) items, \(fmt(freed)) freed" : "Moved \(ok.count) items (\(fmt(freed))) to the Trash"
                 if !failed.isEmpty { msg += ". \(failed.count) couldn't be moved: " + failed.prefix(3).joined(separator: ", ") }
-                self.flash(msg)
+                self.flash(msg, canUndo: !emptyAfter && !moved.isEmpty)
                 done()
             }
         }
+    }
+
+    func undoTrash() {
+        let moves = lastTrashed
+        lastTrashed = []
+        toast = nil
+        var restored = 0
+        for m in moves {
+            do {
+                try FileManager.default.createDirectory(at: URL(fileURLWithPath: m.from).deletingLastPathComponent(), withIntermediateDirectories: true)
+                try FileManager.default.moveItem(at: m.to, to: URL(fileURLWithPath: m.from))
+                restored += 1
+            } catch {}
+        }
+        volume = .current()
+        refreshTrash()
+        cleanResults = [:]
+        refreshClean()
+        flash(restored == moves.count ? "Put back \(restored) items. Rescan to see them in Storage." : "Put back \(restored) of \(moves.count) items. The rest are still in the Trash.")
     }
 
     private func removeFromTree(_ path: String) {
@@ -247,6 +322,7 @@ final class AppModel {
             DispatchQueue.main.async {
                 self.trashSize = size
                 self.trashCount = items?.count ?? 0
+                self.hasFullDiskAccess = items != nil
             }
         }
     }

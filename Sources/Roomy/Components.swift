@@ -39,17 +39,27 @@ struct StageButton: View {
     var body: some View {
         let queued = model.isQueued(path)
         let covered = !queued && model.isCovered(path)
-        let protected = Safety.isProtected(path)
-        Button {
-            model.toggle(path: path, name: name, size: size, source: source)
-        } label: {
-            Image(systemName: queued || covered ? "checkmark.circle.fill" : "plus.circle")
-                .font(.system(size: 15))
-                .foregroundStyle(queued || covered ? Color.green : protected ? Color.secondary.opacity(0.3) : Color.secondary)
+        if Safety.isProtected(path) {
+            Image(systemName: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(width: 70)
+                .help("Protected. Roomy won't remove this folder itself, but you can go inside it and clean what's there.")
+        } else {
+            Button {
+                model.toggle(path: path, name: name, size: size, source: source)
+            } label: {
+                Label(queued || covered ? "Added" : "Add", systemImage: queued || covered ? "checkmark" : "plus")
+                    .font(.caption.weight(.semibold))
+                    .frame(width: 58)
+            }
+            .buttonStyle(.bordered)
+            .controlSize(.small)
+            .tint(queued || covered ? .green : .accentColor)
+            .disabled(covered)
+            .frame(width: 70)
+            .help(queued ? "Remove from your clean list" : covered ? "Its folder is already on your clean list" : "Add to your clean list. Nothing is deleted until you review it.")
         }
-        .buttonStyle(.borderless)
-        .disabled(covered || protected)
-        .help(protected ? "Protected" : queued ? "Remove from cleanup queue" : covered ? "Its folder is already queued" : "Add to cleanup queue")
     }
 }
 
