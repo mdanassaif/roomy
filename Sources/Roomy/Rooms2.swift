@@ -1,5 +1,6 @@
 import SwiftUI
 import AppKit
+import ServiceManagement
 
 // MARK: - Applications
 
@@ -11,7 +12,7 @@ struct AppsRoom: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RoomHeader(room: .apps, subtitle: "Updates and startup, in the same place") {
+            RoomHeader(room: .apps, subtitle: "Updates, startup items and uninstalling, in one place") {
                 Picker("", selection: $tab) {
                     ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
                 }
@@ -105,6 +106,7 @@ struct AppsRoom: View {
             }
         }
         .listStyle(.inset)
+                .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
     }
 
@@ -124,7 +126,7 @@ struct AppsRoom: View {
                         ForEach(items) { item in
                             HStack {
                                 Image(systemName: kind == .loginItem ? "power" : kind == .daemon ? "gearshape.2" : "gearshape")
-                                    .foregroundStyle(.pink).frame(width: 24)
+                                    .foregroundStyle(.secondary).frame(width: 24)
                                 VStack(alignment: .leading, spacing: 1) {
                                     Text(item.name).lineLimit(1)
                                     Text(item.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
@@ -147,6 +149,7 @@ struct AppsRoom: View {
             }
         }
         .listStyle(.inset)
+                .scrollContentBackground(.hidden)
         .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
     }
 
@@ -160,7 +163,7 @@ struct AppsRoom: View {
                 Spacer()
                 Toggle("Sort by size", isOn: $sortBySize).toggleStyle(.checkbox)
             }
-            .padding(.horizontal, 24)
+            .padding(.horizontal, 32)
             .padding(.bottom, 6)
             List(apps) { a in
                 HStack(spacing: 10) {
@@ -190,6 +193,7 @@ struct AppsRoom: View {
                 .contextMenu { Button("Reveal in Finder") { reveal(a.path) } }
             }
             .listStyle(.inset)
+                .scrollContentBackground(.hidden)
             .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
         }
     }
@@ -197,7 +201,7 @@ struct AppsRoom: View {
 
 // MARK: - Snapshots
 
-struct SnapshotsRoom: View {
+struct ChangesView: View {
     @Environment(AppModel.self) private var model
     @State private var fromID: UUID?
     @State private var toID: UUID?
@@ -207,14 +211,17 @@ struct SnapshotsRoom: View {
     var body: some View {
         let snaps = model.snapshots.items
         VStack(spacing: 0) {
-            RoomHeader(room: .snapshots, subtitle: "Scan again next month and see exactly what grew") {
-                if let r = model.root {
+            if let r = model.root {
+                HStack {
+                    Spacer()
                     Button { model.snapshots.save(from: r) } label: { Label("Save Snapshot", systemImage: "camera") }
                 }
+                .padding(.horizontal, 32)
+                .padding(.bottom, 6)
             }
             if snaps.count < 2 {
                 ContentUnavailableView {
-                    Label(snaps.isEmpty ? "No snapshots yet" : "One snapshot so far", systemImage: "camera.aperture")
+                    Label(snaps.isEmpty ? "No snapshots yet" : "One snapshot so far", systemImage: "clock.arrow.circlepath")
                 } description: {
                     Text("Every scan saves a snapshot of folder sizes (turn this off in Settings). Scan again later to compare.")
                 }
@@ -231,7 +238,7 @@ struct SnapshotsRoom: View {
                     }
                     Stepper("Depth \(depth)", value: $depth, in: 1...5).fixedSize()
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 32)
                 HStack {
                     Picker("", selection: $filter) {
                         ForEach(DiffRow.Kind.allCases, id: \.self) { Text($0.rawValue) }
@@ -243,7 +250,7 @@ struct SnapshotsRoom: View {
                     Text("Total \(d >= 0 ? "+" : "−")\(fmt(abs(d)))")
                         .font(.headline).foregroundStyle(d > 0 ? .orange : .green)
                 }
-                .padding(.horizontal, 24)
+                .padding(.horizontal, 32)
                 .padding(.vertical, 8)
                 let rows = SnapshotStore.diff(from, to, maxDepth: depth).filter { filter == .all || $0.kind == filter }
                 List {
@@ -264,6 +271,7 @@ struct SnapshotsRoom: View {
                     Section("All snapshots") { snapshotRows(snaps) }
                 }
                 .listStyle(.inset)
+                .scrollContentBackground(.hidden)
                 .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
             }
         }
@@ -271,13 +279,14 @@ struct SnapshotsRoom: View {
 
     func snapshotList(_ snaps: [Snapshot]) -> some View {
         List { snapshotRows(snaps) }.listStyle(.inset)
+                .scrollContentBackground(.hidden)
     }
 
     @ViewBuilder
     func snapshotRows(_ snaps: [Snapshot]) -> some View {
         ForEach(snaps) { s in
             HStack {
-                Image(systemName: "camera.aperture").foregroundStyle(.teal)
+                Image(systemName: "clock.arrow.circlepath").foregroundStyle(.secondary)
                 Text(label(s))
                 Spacer()
                 Text(fmt(s.total)).monospacedDigit().foregroundStyle(.secondary)
@@ -308,10 +317,9 @@ struct QueueBar: View {
     var body: some View {
         let bytes = model.queuedBytes
         HStack(spacing: 14) {
-            Image(systemName: "tray.full.fill")
-                .font(.title2).foregroundStyle(.white)
-                .frame(width: 42, height: 42)
-                .background(Color.green.gradient, in: RoundedRectangle(cornerRadius: 10))
+            Image(systemName: "tray.full")
+                .font(.title2).foregroundStyle(.secondary)
+                .frame(width: 36)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Clean list: \(model.queue.count) item\(model.queue.count == 1 ? "" : "s") · \(fmt(bytes))").font(.headline)
                 HStack(spacing: 6) {
@@ -326,7 +334,7 @@ struct QueueBar: View {
             Spacer()
             Button("Clear") { model.queue.removeAll() }
             Button("Review & Clean") { model.showReview = true }
-                .buttonStyle(.borderedProminent).tint(.green)
+                .buttonStyle(.borderedProminent)
                 .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(14)
@@ -383,6 +391,7 @@ struct ReviewSheet: View {
                 }
             }
             .listStyle(.inset)
+                .scrollContentBackground(.hidden)
             .frame(minHeight: 280)
             Divider()
             VStack(alignment: .leading, spacing: 10) {
@@ -407,7 +416,7 @@ struct ReviewSheet: View {
                         else { Text(emptyAfter ? "Delete \(model.queue.count) Items" : "Move \(model.queue.count) Items to Trash") }
                     }
                     .buttonStyle(.borderedProminent)
-                    .tint(emptyAfter ? .red : .green)
+                    .tint(emptyAfter ? .red : nil)
                     .disabled(model.queue.isEmpty || model.trashing)
                     .keyboardShortcut(.defaultAction)
                 }
@@ -422,27 +431,43 @@ struct ReviewSheet: View {
 
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
+    @Environment(KeepAwake.self) private var awake
+    @State private var openAtLogin = SMAppService.mainApp.status == .enabled
 
     var body: some View {
         @Bindable var model = model
         Form {
-            Picker("Appearance", selection: $model.appearance) {
-                Text("Match System").tag("system")
-                Text("Light").tag("light")
-                Text("Dark").tag("dark")
+            Section {
+                Picker("Appearance", selection: $model.appearance) {
+                    Text("Match System").tag("system")
+                    Text("Light").tag("light")
+                    Text("Dark").tag("dark")
+                }
+                Toggle("Open at login", isOn: $openAtLogin)
+                    .onChange(of: openAtLogin) { _, on in
+                        if on { try? SMAppService.mainApp.register() } else { try? SMAppService.mainApp.unregister() }
+                        openAtLogin = SMAppService.mainApp.status == .enabled
+                    }
+                Toggle("Save a snapshot after every scan", isOn: $model.autoSnapshot)
             }
-            .pickerStyle(.radioGroup)
-            Toggle("Save a snapshot after every scan", isOn: $model.autoSnapshot)
-            LabeledContent("Full Disk Access") {
-                Button("Open Privacy Settings…") { openFullDiskAccess() }
+            Section {
+                LabeledContent("Lid-closed mode") {
+                    if awake.lidSetupDone {
+                        Text("Set up").foregroundStyle(.secondary)
+                    } else {
+                        Button("Set Up…") { awake.setUpLidClosed() }
+                    }
+                }
+                LabeledContent("Full Disk Access") {
+                    Button("Open Privacy Settings…") { openFullDiskAccess() }
+                }
+            } footer: {
+                Text("Private by design: scanning happens on this Mac. No account, no sync, no analytics. Roomy only uses the network when you press Check for Updates.")
+                    .font(.caption).foregroundStyle(.secondary)
             }
-            Text("Full Disk Access lets Roomy measure the Trash, Mail, Messages and other protected folders.")
-                .font(.caption).foregroundStyle(.secondary)
-            Divider()
-            Text("Private by design: scanning, sizing and matching happen on this Mac. No account, no sync, no analytics, and no filename leaves it. Update checks only run when you press Check for Updates.")
-                .font(.caption).foregroundStyle(.secondary)
         }
-        .padding(24)
+        .formStyle(.grouped)
         .frame(width: 460)
+        .fixedSize(horizontal: false, vertical: true)
     }
 }

@@ -344,13 +344,22 @@ final class SystemMonitor {
     private var timer: Timer?
     private var tick = 0
 
+    private var users = 0
+
+    /// Home and the menu bar can both be showing; sampling stops when neither is.
     func start() {
+        users += 1
         guard timer == nil else { return }
         sample()
         timer = Timer.scheduledTimer(withTimeInterval: 2, repeats: true) { [weak self] _ in self?.sample() }
     }
 
-    func stop() { timer?.invalidate(); timer = nil }
+    func stop() {
+        users = max(0, users - 1)
+        guard users == 0 else { return }
+        timer?.invalidate()
+        timer = nil
+    }
 
     func sample() {
         cpu = readCPU()

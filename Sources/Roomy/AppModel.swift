@@ -2,38 +2,30 @@ import SwiftUI
 import AppKit
 
 enum Room: String, CaseIterable, Identifiable {
-    case overview, storage, clean, large, apps, snapshots
+    case home, clean, storage, apps, awake
     var id: String { rawValue }
     var title: String {
         switch self {
-        case .overview: "Overview"
+        case .home: "Home"
+        case .clean: "Clean Up"
         case .storage: "Storage"
-        case .clean: "Quick Clean"
-        case .large: "Large Files"
-        case .apps: "Applications"
-        case .snapshots: "Snapshots"
+        case .apps: "Apps"
+        case .awake: "Keep Awake"
         }
     }
     var icon: String {
         switch self {
-        case .overview: "gauge.with.dots.needle.33percent"
-        case .storage: "square.grid.3x3.square"
+        case .home: "house"
         case .clean: "sparkles"
-        case .large: "doc.badge.ellipsis"
+        case .storage: "square.grid.2x2"
         case .apps: "app.badge"
-        case .snapshots: "camera.aperture"
+        case .awake: "cup.and.saucer"
         }
     }
-    var color: Color {
-        switch self {
-        case .overview: .blue
-        case .storage: .purple
-        case .clean: .green
-        case .large: .orange
-        case .apps: .pink
-        case .snapshots: .teal
-        }
-    }
+}
+
+enum StorageTab: String, CaseIterable {
+    case folders = "Folders", large = "Large Files", changes = "Changes"
 }
 
 struct Toast: Equatable {
@@ -52,7 +44,8 @@ struct QueueItem: Identifiable, Hashable {
 
 @Observable
 final class AppModel {
-    var room: Room = .overview
+    var room: Room = .home
+    var storageTab: StorageTab = .folders
     var volume = VolumeInfo.current()
 
     // Scan
@@ -213,6 +206,7 @@ final class AppModel {
 
     func open(_ node: FileNode) {
         current = node
+        storageTab = .folders
         room = .storage
     }
 

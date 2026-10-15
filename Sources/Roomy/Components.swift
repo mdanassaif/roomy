@@ -13,12 +13,12 @@ struct DiskBar: View {
             let uw = g.size.width * Double(used) / t
             let sw = g.size.width * Double(min(staged, used)) / t
             ZStack(alignment: .leading) {
-                Rectangle().fill(Color.secondary.opacity(0.18))
+                Rectangle().fill(Color.primary.opacity(0.07))
                 Rectangle()
-                    .fill(LinearGradient(colors: [.blue, .purple], startPoint: .leading, endPoint: .trailing))
+                    .fill(Theme.accent.gradient)
                     .frame(width: max(0, uw))
                 Rectangle()
-                    .fill(Color.green)
+                    .fill(Theme.good)
                     .frame(width: max(0, sw))
                     .offset(x: max(0, uw - sw))
             }
@@ -55,7 +55,7 @@ struct StageButton: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .tint(queued || covered ? .green : .accentColor)
+            .tint(queued || covered ? .green : nil)
             .disabled(covered)
             .frame(width: 70)
             .help(queued ? "Remove from your clean list" : covered ? "Its folder is already on your clean list" : "Add to your clean list. Nothing is deleted until you review it.")
@@ -79,12 +79,12 @@ struct FileIcon: View {
 
 struct SizeBar: View {
     let fraction: Double
-    var color: Color = .purple
+    var color: Color = Theme.accent
 
     var body: some View {
         GeometryReader { g in
             ZStack(alignment: .leading) {
-                Capsule().fill(Color.secondary.opacity(0.12))
+                Capsule().fill(Color.primary.opacity(0.07))
                 Capsule().fill(color.gradient).frame(width: g.size.width * min(1, max(0.01, fraction)))
             }
         }
@@ -98,33 +98,30 @@ struct RoomHeader<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(alignment: .center, spacing: 12) {
-            Image(systemName: room.icon)
-                .font(.system(size: 20, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 40, height: 40)
-                .background(room.color.gradient, in: RoundedRectangle(cornerRadius: 10))
-            VStack(alignment: .leading, spacing: 2) {
-                Text(room.title).font(.title2.bold())
-                Text(subtitle).font(.callout).foregroundStyle(.secondary)
+        HStack(alignment: .bottom, spacing: 12) {
+            VStack(alignment: .leading, spacing: 5) {
+                Text(room.title).font(.system(size: 30, weight: .bold)).tracking(-0.5)
+                Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
             trailing
         }
-        .padding(.horizontal, 24)
-        .padding(.top, 20)
-        .padding(.bottom, 12)
+        .padding(.horizontal, 32)
+        .padding(.top, 26)
+        .padding(.bottom, 16)
     }
 }
 
 struct Card<Content: View>: View {
+    var padding: CGFloat = 18
     @ViewBuilder var content: Content
     var body: some View {
         content
-            .padding(16)
+            .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Color(nsColor: .controlBackgroundColor), in: RoundedRectangle(cornerRadius: 12))
-            .overlay(RoundedRectangle(cornerRadius: 12).strokeBorder(Color.secondary.opacity(0.15)))
+            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
+            .shadow(color: .black.opacity(0.04), radius: 14, y: 6)
     }
 }
 
@@ -160,8 +157,9 @@ func openFullDiskAccess() {
 
 extension Color {
     static func treemap(_ i: Int) -> Color {
-        let palette: [Color] = [.purple, .blue, .teal, .green, .orange, .pink, .indigo, .mint, .cyan, .red, .yellow, .brown]
-        return palette[i % palette.count]
+        // One calm blue family instead of a rainbow.
+        let shades: [Double] = [1, 0.88, 0.77, 0.67, 0.58]
+        return Theme.accent.opacity(shades[i % shades.count])
     }
 }
 
@@ -231,7 +229,7 @@ struct TreemapView: View {
                     if r.width > 2 && r.height > 2 {
                         let queued = model.isQueued(child.path) || model.isCovered(child.path)
                         RoundedRectangle(cornerRadius: 6)
-                            .fill(child.isAggregate ? Color.gray.opacity(0.35) : Color.treemap(i).opacity(child.isDir ? 0.85 : 0.55))
+                            .fill(child.isAggregate ? Color.gray.opacity(0.3) : Color.treemap(i))
                             .overlay {
                                 if queued {
                                     RoundedRectangle(cornerRadius: 6).strokeBorder(Color.green, lineWidth: 3)
@@ -264,4 +262,10 @@ struct TreemapView: View {
             }
         }
     }
+}
+
+/// A scrolling room page.
+struct Page<Content: View>: View {
+    @ViewBuilder var content: Content
+    var body: some View { ScrollView { content } }
 }
