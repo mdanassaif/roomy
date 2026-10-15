@@ -8,6 +8,7 @@ struct HomeRoom: View {
     @Environment(SystemMonitor.self) private var mon
     @Environment(KeepAwake.self) private var awake
     @State private var confirmEmpty = false
+    @State private var insightColumns = 4
 
     var freeFraction: Double { Double(model.volume.free) / Double(max(model.volume.total, 1)) }
     var low: Bool { freeFraction < 0.10 }
@@ -90,7 +91,8 @@ struct HomeRoom: View {
     // MARK: Insights
 
     var insights: some View {
-        LazyVGrid(columns: [GridItem(.adaptive(minimum: 180), spacing: 16)], spacing: 16) {
+        // Four across when there's room, two when the window is narrow. Never a gap on the right.
+        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: insightColumns), spacing: 16) {
             let free = sizeParts(model.volume.free)
             InsightCard(value: free.0, unit: free.1, meter: 1 - freeFraction, meterColor: low ? Theme.warn : Theme.accent,
                         corner: "of \(sizeParts(model.volume.total).0) \(sizeParts(model.volume.total).1)",
@@ -125,6 +127,7 @@ struct HomeRoom: View {
                 if model.lastUpdateCheck == nil { model.checkUpdates() }
             }
         }
+        .onGeometryChange(for: Int.self) { $0.size.width >= 760 ? 4 : 2 } action: { insightColumns = $0 }
     }
 
     // MARK: Today
