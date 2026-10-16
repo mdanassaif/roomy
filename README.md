@@ -4,7 +4,7 @@ A native macOS app to see what's filling your disk, clean it up safely, keep you
 
 Built with SwiftUI. It's free, open source and runs entirely on your Mac.
 
-![Roomy Home in dark mode](docs/screenshot.png)
+![Roomy Home in dark mode](docs/roomy-home.png)
 
 ## Features
 
