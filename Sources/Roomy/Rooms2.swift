@@ -171,7 +171,7 @@ struct AppsRoom: View {
                     VStack(alignment: .leading, spacing: 1) {
                         HStack {
                             Text(a.name).font(.headline)
-                            if a.isAppStore { Text("App Store").font(.caption2).padding(.horizontal, 5).background(.blue.opacity(0.15), in: Capsule()) }
+                            if a.isAppStore { Text("App Store").font(.caption2).padding(.horizontal, 5).background(Theme.calm.opacity(0.15), in: Capsule()) }
                         }
                         Text(a.version.isEmpty ? a.bundleID : "Version \(a.version)").font(.caption).foregroundStyle(.secondary)
                     }
@@ -185,7 +185,7 @@ struct AppsRoom: View {
                             model.stageUninstall(a)
                         }
                     }
-                    .tint(staged ? .green : nil)
+                    .tint(staged ? Theme.good : nil)
                     .disabled(a.bundleID.hasPrefix("com.apple."))
                     .help("Adds the app plus its support files, caches and preferences to your clean list")
                 }
@@ -248,7 +248,7 @@ struct ChangesView: View {
                     Spacer()
                     let d = to.total - from.total
                     Text("Total \(d >= 0 ? "+" : "−")\(fmt(abs(d)))")
-                        .font(.headline).foregroundStyle(d > 0 ? .orange : .green)
+                        .font(.headline).foregroundStyle(d > 0 ? Theme.warm : Theme.good)
                 }
                 .padding(.horizontal, 32)
                 .padding(.vertical, 8)
@@ -305,7 +305,7 @@ struct ChangesView: View {
     }
 
     func color(_ k: DiffRow.Kind) -> Color {
-        switch k { case .grew, .new: .orange; case .shrank, .gone: .green; case .all: .primary }
+        switch k { case .grew, .new: Theme.warm; case .shrank, .gone: Theme.good; case .all: .primary }
     }
 }
 
@@ -317,19 +317,17 @@ struct QueueBar: View {
     var body: some View {
         let bytes = model.queuedBytes
         HStack(spacing: 14) {
-            Image(systemName: "tray.full")
-                .font(.title2).foregroundStyle(.secondary)
-                .frame(width: 36)
+            Glyph(symbol: "tray.full", color: Theme.accent, size: 40)
             VStack(alignment: .leading, spacing: 4) {
                 Text("Clean list: \(model.queue.count) item\(model.queue.count == 1 ? "" : "s") · \(fmt(bytes))").font(.headline)
                 HStack(spacing: 6) {
                     Text("Free \(fmt(model.volume.free))")
                     Image(systemName: "arrow.right").font(.caption2)
-                    Text(fmt(model.volume.free + bytes)).bold().foregroundStyle(.green)
+                    Text(fmt(model.volume.free + bytes)).bold().foregroundStyle(Theme.good)
                     Text("afterwards")
                 }
                 .font(.caption).foregroundStyle(.secondary)
-                DiskBar(total: model.volume.total, used: model.volume.used, staged: bytes, height: 5).frame(width: 240)
+                DiskBar(total: model.volume.total, used: model.volume.used, staged: bytes, height: 6, count: 24).frame(width: 240)
             }
             Spacer()
             Button("Clear") { model.queue.removeAll() }
@@ -338,9 +336,9 @@ struct QueueBar: View {
                 .keyboardShortcut(.return, modifiers: .command)
         }
         .padding(14)
-        .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 16))
-        .overlay(RoundedRectangle(cornerRadius: 16).strokeBorder(Color.secondary.opacity(0.2)))
-        .shadow(color: .black.opacity(0.18), radius: 16, y: 6)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.accent.opacity(0.5), lineWidth: 1))
+        .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
     }
 }
 

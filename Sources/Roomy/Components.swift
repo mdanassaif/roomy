@@ -6,26 +6,13 @@ struct DiskBar: View {
     let used: Int64
     var staged: Int64 = 0
     var height: CGFloat = 14
+    var count = 30
 
     var body: some View {
-        GeometryReader { g in
-            let t = Double(max(total, 1))
-            let uw = g.size.width * Double(used) / t
-            let sw = g.size.width * Double(min(staged, used)) / t
-            ZStack(alignment: .leading) {
-                Rectangle().fill(Color.primary.opacity(0.07))
-                Rectangle()
-                    .fill(Theme.accent.gradient)
-                    .frame(width: max(0, uw))
-                Rectangle()
-                    .fill(Theme.good)
-                    .frame(width: max(0, sw))
-                    .offset(x: max(0, uw - sw))
-            }
-            .clipShape(Capsule())
-        }
-        .frame(height: height)
-        .animation(.snappy, value: staged)
+        let t = Double(max(total, 1))
+        let s = Double(min(staged, used)) / t
+        BlockBar(parts: [(Double(used) / t - s, Theme.accent), (s, Theme.good)], count: count, height: height)
+            .animation(.snappy, value: staged)
     }
 }
 
@@ -55,7 +42,7 @@ struct StageButton: View {
             }
             .buttonStyle(.bordered)
             .controlSize(.small)
-            .tint(queued || covered ? .green : nil)
+            .tint(queued || covered ? Theme.good : nil)
             .disabled(covered)
             .frame(width: 70)
             .help(queued ? "Remove from your clean list" : covered ? "Its folder is already on your clean list" : "Add to your clean list. Nothing is deleted until you review it.")
@@ -82,13 +69,7 @@ struct SizeBar: View {
     var color: Color = Theme.accent
 
     var body: some View {
-        GeometryReader { g in
-            ZStack(alignment: .leading) {
-                Capsule().fill(Color.primary.opacity(0.07))
-                Capsule().fill(color.gradient).frame(width: g.size.width * min(1, max(0.01, fraction)))
-            }
-        }
-        .frame(width: 90, height: 6)
+        Meter(fraction: max(0.03, fraction), color: color, height: 7, count: 12).frame(width: 90)
     }
 }
 
@@ -100,7 +81,7 @@ struct RoomHeader<Trailing: View>: View {
     var body: some View {
         HStack(alignment: .bottom, spacing: 12) {
             VStack(alignment: .leading, spacing: 5) {
-                Text(room.title).font(.system(size: 30, weight: .bold)).tracking(-0.5)
+                Text(room.title).font(.system(size: 32, weight: .regular, design: .serif)).tracking(-0.4)
                 Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(2)
             }
             Spacer()
@@ -120,8 +101,7 @@ struct Card<Content: View>: View {
             .padding(padding)
             .frame(maxWidth: .infinity, alignment: .leading)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-            .shadow(color: .black.opacity(0.05), radius: 1, y: 1)
-            .shadow(color: .black.opacity(0.04), radius: 14, y: 6)
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
     }
 }
 
@@ -157,9 +137,9 @@ func openFullDiskAccess() {
 
 extension Color {
     static func treemap(_ i: Int) -> Color {
-        // One calm blue family instead of a rainbow.
-        let shades: [Double] = [1, 0.88, 0.77, 0.67, 0.58]
-        return Theme.accent.opacity(shades[i % shades.count])
+        // Warm earth tones, like a coloured floor plan.
+        let tones: [Color] = [Theme.accent, Theme.warm, Theme.good, Theme.calm, Theme.accent.opacity(0.7), Theme.warm.opacity(0.7)]
+        return tones[i % tones.count]
     }
 }
 
@@ -228,11 +208,12 @@ struct TreemapView: View {
                     let r = rects[i].insetBy(dx: 1.5, dy: 1.5)
                     if r.width > 2 && r.height > 2 {
                         let queued = model.isQueued(child.path) || model.isCovered(child.path)
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(child.isAggregate ? Color.gray.opacity(0.3) : Color.treemap(i))
+                        RoundedRectangle(cornerRadius: 4, style: .continuous)
+                            .fill(child.isAggregate ? Theme.empty : Color.treemap(i))
+                            .opacity(queued ? 0.45 : 1)
                             .overlay {
                                 if queued {
-                                    RoundedRectangle(cornerRadius: 6).strokeBorder(Color.green, lineWidth: 3)
+                                    RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Theme.canvas, style: StrokeStyle(lineWidth: 3, dash: [5, 3]))
                                 }
                             }
                             .overlay(alignment: .topLeading) {

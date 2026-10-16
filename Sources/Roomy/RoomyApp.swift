@@ -58,8 +58,11 @@ struct ContentView: View {
             .navigationSplitViewColumnWidth(min: 180, ideal: 200)
             .safeAreaInset(edge: .bottom) {
                 VStack(alignment: .leading, spacing: 6) {
-                    DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 5)
-                    Text("\(fmt(model.volume.free)) free").font(.caption).foregroundStyle(.secondary)
+                    HStack(alignment: .firstTextBaseline, spacing: 4) {
+                        Text(sizeParts(model.volume.free).0).font(.system(size: 22, design: .serif)).monospacedDigit()
+                        Text("\(sizeParts(model.volume.free).1) free").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                    }
+                    DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 7, count: 16)
                 }
                 .padding(16)
             }
@@ -96,8 +99,9 @@ struct ContentView: View {
                         }
                     }
                     .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(.regularMaterial, in: Capsule())
-                    .shadow(color: .black.opacity(0.12), radius: 10, y: 4)
+                    .background(Theme.card, in: Capsule())
+                    .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
+                    .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
                     .padding(.top, 12)
                     .transition(.move(edge: .top).combined(with: .opacity))
                 }
@@ -152,12 +156,12 @@ struct MonitorView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(fmt(model.volume.free)).font(.title3.weight(.semibold)).monospacedDigit()
+                    Text(fmt(model.volume.free)).font(.system(size: 22, design: .serif)).monospacedDigit()
                     Text("free").foregroundStyle(.secondary)
                     Spacer()
                     Text("of \(fmt(model.volume.total))").font(.caption).foregroundStyle(.secondary)
                 }
-                DiskBar(total: model.volume.total, used: model.volume.used, height: 6)
+                DiskBar(total: model.volume.total, used: model.volume.used, height: 8, count: 24)
             }
 
             HStack(spacing: 0) {

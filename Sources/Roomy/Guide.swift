@@ -15,9 +15,9 @@ struct Advice {
         }
         var color: Color {
             switch self {
-            case .safe: .green
-            case .rebuilds: .teal
-            case .review: .orange
+            case .safe: Theme.good
+            case .rebuilds: Theme.calm
+            case .review: Theme.warm
             case .keep: .secondary
             }
         }

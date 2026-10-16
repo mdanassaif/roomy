@@ -8,7 +8,7 @@ struct HomeRoom: View {
     @Environment(SystemMonitor.self) private var mon
     @Environment(KeepAwake.self) private var awake
     @State private var confirmEmpty = false
-    @State private var insightColumns = 4
+    @State private var wide = true
 
     var freeFraction: Double { Double(model.volume.free) / Double(max(model.volume.total, 1)) }
     var low: Bool { freeFraction < 0.10 }
@@ -17,19 +17,29 @@ struct HomeRoom: View {
         let _ = model.treeVersion
         Page {
             VStack(alignment: .leading, spacing: 0) {
-                greeting.padding(.bottom, 22)
-                headline.padding(.bottom, 22)
-                insights
-                if !model.hasFullDiskAccess { FullDiskAccessCard().padding(.top, 16) }
+                masthead.padding(.bottom, 26)
+                Group {
+                    if wide {
+                        HStack(alignment: .top, spacing: 16) {
+                            spaceCard
+                            todo.frame(width: 360)
+                        }
+                        .fixedSize(horizontal: false, vertical: true)
+                    } else {
+                        VStack(spacing: 16) { spaceCard; todo }
+                    }
+                }
+                .onGeometryChange(for: Bool.self) { $0.size.width >= 820 } action: { wide = $0 }
+                if !model.hasFullDiskAccess { FullDiskAccessCard().padding(.top, 14) }
 
-                sectionTitle("Your Mac today").padding(.top, 34).padding(.bottom, 14)
-                today
+                sectionTitle("Your Mac right now").padding(.top, 36).padding(.bottom, 12)
+                vitals
 
-                sectionTitle(model.root.map { "Biggest in \($0.name)" } ?? "What's taking space").padding(.top, 34).padding(.bottom, 14)
+                sectionTitle(model.root.map { "Biggest in \($0.name)" } ?? "What's taking space").padding(.top, 36).padding(.bottom, 12)
                 biggest
             }
-            .padding(.horizontal, 32)
-            .padding(.top, 26)
+            .padding(.horizontal, 36)
+            .padding(.top, 30)
             .padding(.bottom, 120)
         }
         .confirmationDialog("Empty the Trash?", isPresented: $confirmEmpty) {
@@ -43,16 +53,17 @@ struct HomeRoom: View {
 
     // MARK: Top
 
-    var greeting: some View {
-        HStack(spacing: 12) {
-            Image(systemName: low ? "exclamationmark" : "face.smiling")
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundStyle(.white)
-                .frame(width: 34, height: 34)
-                .background((low ? Theme.warn : Theme.accent).gradient, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
-            Text(Self.greeting()).font(.title3).foregroundStyle(.secondary)
-            Spacer()
-            Mono(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))
+    var masthead: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Circle().fill(low ? Theme.warn : Theme.accent).frame(width: 7, height: 7)
+                Text("\(Self.greeting()) · \(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))")
+                    .font(.callout.weight(.medium)).foregroundStyle(.secondary)
+            }
+            Text(headlineText)
+                .font(.system(size: 40, weight: .regular, design: .serif))
+                .tracking(-0.6)
+            Text(subheadText).font(.title3).foregroundStyle(.secondary)
         }
     }
 
@@ -65,17 +76,8 @@ struct HomeRoom: View {
         }
     }
 
-    var headline: some View {
-        VStack(alignment: .leading, spacing: 6) {
-            Text(headlineText)
-                .font(.system(size: 34, weight: .bold, design: .default))
-                .tracking(-0.6)
-            Text(subheadText).font(.title3).foregroundStyle(.secondary)
-        }
-    }
-
     var headlineText: String {
-        if freeFraction < 0.05 { return "This Mac has almost run out of space" }
+        if freeFraction < 0.05 { return "This Mac has almost run out of room" }
         if low { return "Space is getting tight" }
         if freeFraction < 0.25 { return "This Mac is in good shape" }
         return "This Mac has plenty of room"
@@ -88,236 +90,175 @@ struct HomeRoom: View {
         return "Nothing obvious to clean right now."
     }
 
-    // MARK: Insights
+    // MARK: Space
 
-    var insights: some View {
-        // Four across when there's room, two when the window is narrow. Never a gap on the right.
-        LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 16), count: insightColumns), spacing: 16) {
-            let free = sizeParts(model.volume.free)
-            InsightCard(value: free.0, unit: free.1, meter: 1 - freeFraction, meterColor: low ? Theme.warn : Theme.accent,
-                        corner: "of \(sizeParts(model.volume.total).0) \(sizeParts(model.volume.total).1)",
-                        title: "free space",
-                        detail: low ? "Updates and saving files will start to fail" : "Room for updates and new things",
-                        action: "See what's using it", urgent: low) {
-                if let root = model.root { model.open(root) } else { model.storageTab = .folders; model.room = .storage }
+    var spaceCard: some View {
+        let t = Double(max(model.volume.total, 1))
+        let used = Double(model.volume.used) / t
+        let staged = Double(min(model.queuedBytes, model.volume.used)) / t
+        let free = sizeParts(model.volume.free)
+        return VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 10) {
+                FileIcon(path: "/", size: 22)
+                Eyebrow("Macintosh HD · \(fmt(model.volume.total))")
+                Spacer()
+                OpenLink(title: "Storage") { model.room = .storage }
             }
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                BigValue(value: free.0, unit: "\(free.1) free", size: 64)
+                Spacer()
+                Text("\(Int(used * 100))% used").font(.callout.monospacedDigit()).foregroundStyle(low ? Theme.warn : .secondary)
+            }
+            .padding(.top, 14)
+            // The disk as a floor plan: two rows of rooms.
+            VStack(spacing: 3) {
+                let rows = 2, per = 32
+                ForEach(0..<rows, id: \.self) { r in
+                    let lo = Double(r) / Double(rows)
+                    let span = 1 / Double(rows)
+                    let u = min(max(used - staged - lo, 0), span) / span
+                    let s = min(max(used - lo, 0), span) / span - u
+                    BlockBar(parts: [(u, low ? Theme.warn : Theme.accent), (s, Theme.good)], count: per, height: 18, gap: 3)
+                }
+            }
+            .padding(.top, 14)
+            .animation(.snappy, value: staged)
+            HStack(spacing: 16) {
+                legend(low ? Theme.warn : Theme.accent, "Used \(fmt(model.volume.used))")
+                if model.queuedBytes > 0 { legend(Theme.good, "On your clean list \(fmt(model.queuedBytes))") }
+                legend(Theme.empty, "Free \(fmt(model.volume.free))")
+                Spacer()
+            }
+            .padding(.top, 12)
+            HStack {
+                Text(low ? "Updates and saving files will start to fail soon." : "Room for updates and new things.")
+                    .font(.callout).foregroundStyle(.secondary)
+                Spacer()
+                Button("See what's using it") {
+                    if let root = model.root { model.open(root) } else { model.storageTab = .folders; model.room = .storage }
+                }
+                .buttonStyle(PillButtonStyle(color: low ? Theme.warn : Theme.accent, filled: low))
+            }
+            .padding(.top, 18)
+        }
+        .tile(padding: 24)
+    }
 
-            let clean = sizeParts(model.smartBytes)
-            InsightCard(value: model.cleanLoading && model.smartBytes == 0 ? "…" : clean.0, unit: model.smartBytes > 0 ? clean.1 : "",
-                        corner: "\(model.smartItems.reduce(0) { $0 + $1.items.count }) items",
-                        title: "Temporary files",
-                        detail: "Caches, logs and build files nothing needs",
-                        action: model.smartBytes > 0 ? "Clean up…" : "Nothing to clean",
-                        disabled: model.smartBytes == 0) { model.stageSmart() }
+    func legend(_ c: Color, _ text: String) -> some View {
+        HStack(spacing: 6) {
+            RoundedRectangle(cornerRadius: 2).fill(c).frame(width: 9, height: 9)
+            Text(text).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+        }
+    }
 
-            let trash = sizeParts(model.trashSize ?? 0)
-            InsightCard(value: model.trashSize == nil ? "–" : trash.0, unit: model.trashSize == nil ? "" : trash.1,
-                        corner: model.trashSize == nil ? "" : "\(model.trashCount) items",
-                        title: model.trashSize == nil ? "Trash size hidden" : "in the Trash",
-                        detail: "Still takes space until you empty it",
-                        action: "Empty Trash", disabled: model.trashSize == 0) { confirmEmpty = true }
+    // MARK: Worth doing
 
-            let updates = model.sparkleUpdates.count + model.brewOutdated.count
-            InsightCard(value: model.lastUpdateCheck == nil ? "–" : "\(updates)",
-                        corner: model.lastUpdateCheck.map { $0.formatted(.relative(presentation: .named)) } ?? "",
-                        title: model.lastUpdateCheck == nil ? "Updates unchecked" : updates == 1 ? "update is waiting" : "updates are waiting",
-                        detail: "From app feeds and Homebrew",
-                        action: model.lastUpdateCheck == nil ? "Check for updates" : "See updates") {
+    var todo: some View {
+        let clean = sizeParts(model.smartBytes)
+        let trash = sizeParts(model.trashSize ?? 0)
+        let updates = model.sparkleUpdates.count + model.brewOutdated.count
+        return VStack(alignment: .leading, spacing: 0) {
+            Text("Worth doing").font(.system(size: 20, weight: .regular, design: .serif)).padding(.bottom, 8)
+            TodoRow(symbol: "sparkles", color: Theme.accent,
+                    title: "Temporary files",
+                    value: model.cleanLoading && model.smartBytes == 0 ? "…" : model.smartBytes > 0 ? "\(clean.0) \(clean.1)" : "None",
+                    detail: "Caches, logs and build files nothing needs",
+                    action: "Clean up", primary: model.smartBytes > 0, disabled: model.smartBytes == 0) { model.stageSmart() }
+            Divider().overlay(Theme.line)
+            TodoRow(symbol: "trash", color: Theme.warm,
+                    title: "Trash",
+                    value: model.trashSize == nil ? "Hidden" : "\(trash.0) \(trash.1)",
+                    detail: model.trashSize == nil ? "Allow Full Disk Access to see its size" : "\(model.trashCount) items still taking space",
+                    action: "Empty", disabled: model.trashSize == 0) { confirmEmpty = true }
+            Divider().overlay(Theme.line)
+            TodoRow(symbol: "arrow.down.circle", color: Theme.calm,
+                    title: "Updates",
+                    value: model.lastUpdateCheck == nil ? "Unchecked" : "\(updates)",
+                    detail: model.lastUpdateCheck.map { "Checked \($0.formatted(.relative(presentation: .named)))" } ?? "From app feeds and Homebrew",
+                    action: model.lastUpdateCheck == nil ? "Check" : "See") {
                 model.room = .apps
                 if model.lastUpdateCheck == nil { model.checkUpdates() }
             }
         }
-        .onGeometryChange(for: Int.self) { $0.size.width >= 760 ? 4 : 2 } action: { insightColumns = $0 }
+        .tile(padding: 20)
     }
 
-    // MARK: Today
+    // MARK: Right now
 
-    var today: some View {
-        VStack(spacing: 16) {
-            HStack(spacing: 16) {
-                spaceTile.frame(maxWidth: .infinity)
-                HStack(spacing: 16) {
-                    batteryTile
-                    awakeTile
+    var vitals: some View {
+        let memFrac = Double(mon.memUsed) / Double(max(mon.memTotal, 1))
+        let level = mon.battery?.level ?? 100
+        let down = sizeParts(Int64(mon.rxRate))
+        let cells: [AnyView] = [
+            AnyView(VitalCell(symbol: "memorychip", label: "Memory", value: "\(Int(memFrac * 100))", unit: "%",
+                              note: memFrac > 0.85 ? "Tight · of \(fmt(Int64(mon.memTotal)))" : "of \(fmt(Int64(mon.memTotal)))",
+                              fraction: memFrac, color: memFrac > 0.85 ? Theme.warn : Theme.accent)),
+            AnyView(VitalCell(symbol: "cpu", label: "Processor", value: "\(Int(mon.cpu * 100))", unit: "%",
+                              note: mon.processes.first.map { "Busiest: \($0.name)" } ?? "Idle",
+                              fraction: mon.cpu, color: Theme.calm)),
+            AnyView(VitalCell(symbol: mon.battery?.charging == true ? "bolt.fill" : "battery.75percent", label: "Battery",
+                              value: mon.battery == nil ? "AC" : "\(level)", unit: mon.battery == nil ? "" : "%",
+                              note: mon.battery.map { $0.charging ? "Charging" : $0.onAC ? "On power" : "On battery" } ?? "On power",
+                              fraction: Double(level) / 100, color: level <= 20 ? Theme.warn : Theme.good)),
+            AnyView(VitalCell(symbol: "dot.radiowaves.left.and.right", label: "Network", value: down.0, unit: "\(down.1)/s",
+                              note: "↑ \(fmt(Int64(mon.txRate)))/s · \(mon.ports.count) ports", fraction: nil, color: Theme.calm)),
+            AnyView(awakeCell),
+        ]
+        return ViewThatFits(in: .horizontal) {
+            HStack(spacing: 0) {
+                ForEach(cells.indices, id: \.self) { i in
+                    if i > 0 { Rectangle().fill(Theme.line).frame(width: 1) }
+                    cells[i].frame(minWidth: 150)
                 }
-                .frame(maxWidth: .infinity)
             }
-            .frame(height: 220)
-            HStack(spacing: 16) {
-                HStack(spacing: 16) {
-                    memoryTile
-                    cpuTile
-                }
-                .frame(maxWidth: .infinity)
-                networkTile.frame(maxWidth: .infinity)
-            }
-            .frame(height: 190)
-        }
-    }
-
-    var spaceTile: some View {
-        let used = Double(model.volume.used) / Double(max(model.volume.total, 1))
-        let staged = Double(model.queuedBytes) / Double(max(model.volume.total, 1))
-        let free = sizeParts(model.volume.free)
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(spacing: 12) {
-                FileIcon(path: "/", size: 40)
-                VStack(alignment: .leading, spacing: 1) {
-                    Text("Space").font(.headline)
-                    Text("Macintosh HD").font(.callout).foregroundStyle(.secondary)
-                }
-                Spacer()
-                ArrowButton { model.room = .storage }
-            }
-            Spacer(minLength: 10)
-            HStack(alignment: .firstTextBaseline) {
-                BigValue(value: free.0, unit: "\(free.1) available", size: 40)
-                Spacer()
-                Mono("\(fmt(model.volume.total)) disk")
-            }
-            GeometryReader { g in
-                ZStack(alignment: .leading) {
-                    RoundedRectangle(cornerRadius: 12, style: .continuous).fill(Color.primary.opacity(0.06))
-                    RoundedRectangle(cornerRadius: 9, style: .continuous)
-                        .fill((low ? Theme.warn : Theme.accent).gradient)
-                        .frame(width: max(18, (g.size.width - 8) * used))
-                        .padding(4)
-                    if staged > 0 {
-                        RoundedRectangle(cornerRadius: 9, style: .continuous)
-                            .fill(Theme.good.gradient)
-                            .frame(width: max(6, (g.size.width - 8) * min(staged, used)))
-                            .padding(4)
-                            .offset(x: (g.size.width - 8) * (used - min(staged, used)))
+            .fixedSize(horizontal: false, vertical: true)
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    ForEach(0..<3, id: \.self) { i in
+                        if i > 0 { Rectangle().fill(Theme.line).frame(width: 1) }
+                        cells[i]
                     }
                 }
-            }
-            .frame(height: 40)
-            .padding(.top, 8)
-            .animation(.snappy, value: staged)
-            HStack {
-                if low {
-                    Label("Running out of room", systemImage: "exclamationmark.triangle.fill").foregroundStyle(Theme.warn)
-                } else if staged > 0 {
-                    Label("\(fmt(model.queuedBytes)) on your clean list", systemImage: "checkmark.circle.fill").foregroundStyle(Theme.good)
-                } else {
-                    Label("Plenty of room", systemImage: "checkmark.circle.fill").foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                Rectangle().fill(Theme.line).frame(height: 1)
+                HStack(spacing: 0) {
+                    cells[3]
+                    Rectangle().fill(Theme.line).frame(width: 1)
+                    cells[4]
                 }
-                Spacer()
-                Mono("\(Int(used * 100))% used")
-            }
-            .font(.callout)
-            .padding(.top, 10)
-        }
-        .tile()
-    }
-
-    var batteryTile: some View {
-        let level = mon.battery?.level ?? 100
-        let state = mon.battery.map { $0.charging ? "Charging" : $0.onAC ? "On power" : "On battery" } ?? "On power"
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                VStack(alignment: .leading, spacing: 4) {
-                    BigValue(value: mon.battery == nil ? "AC" : "\(level)", unit: mon.battery == nil ? "" : "%", size: 38)
-                    Mono(state)
-                }
-                Spacer()
-                Image(systemName: mon.battery?.onAC == false ? "battery.75percent" : "bolt.fill")
-                    .font(.title3).foregroundStyle(.white.opacity(0.55))
-            }
-            Spacer()
-            VStack(spacing: 6) {
-                Meter(fraction: Double(level) / 100, color: level <= 20 ? Theme.warn : Theme.good, height: 6)
-                HStack {
-                    Mono("0"); Spacer(); Mono("50"); Spacer(); Mono("100")
-                }
+                .fixedSize(horizontal: false, vertical: true)
             }
         }
-        .inkTile(glow: mon.battery?.charging == true ? Theme.good : nil)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
     }
 
-    var awakeTile: some View {
+    var awakeCell: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Label("Awake", systemImage: awake.isOn ? "cup.and.heat.waves.fill" : "moon.fill")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(awake.isOn ? Theme.warm : .white.opacity(0.7))
+                Label("Keep Awake", systemImage: awake.isOn ? "cup.and.heat.waves.fill" : "moon.zzz")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(awake.isOn ? Theme.warm : .secondary)
                 Spacer()
-                ArrowButton { model.room = .awake }
             }
-            Spacer()
-            Text(awake.isOn ? (awake.until.map { "Awake until \($0.formatted(date: .omitted, time: .shortened))" } ?? "Awake all night")
-                            : "Sleeping normally")
-                .font(.title3.weight(.semibold))
-                .lineLimit(2)
-                .minimumScaleFactor(0.8)
-            Text(awake.isOn ? (awake.lidClosedActive ? "Lid closed is fine" : "Keep the lid open") : "Your Mac sleeps as usual")
-                .font(.caption).foregroundStyle(.white.opacity(0.6))
-                .padding(.top, 2)
-            Toggle("Keep awake", isOn: Binding(get: { awake.isOn }, set: { $0 ? awake.turnOn() : awake.turnOff() }))
-                .toggleStyle(.switch)
-                .tint(Theme.warm)
-                .labelsHidden()
-                .padding(.top, 12)
+            Text(awake.isOn ? "On" : "Off")
+                .font(.system(size: 30, weight: .regular, design: .serif))
+                .foregroundStyle(awake.isOn ? Theme.warm : .primary)
+                .padding(.top, 10)
+            Text(awake.isOn ? (awake.until.map { "Until \($0.formatted(date: .omitted, time: .shortened))" } ?? "Until you stop it") : "Sleeps as usual")
+                .font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 10)
+            HStack {
+                Toggle("Keep awake", isOn: Binding(get: { awake.isOn }, set: { $0 ? awake.turnOn() : awake.turnOff() }))
+                    .toggleStyle(.switch).tint(Theme.warm).labelsHidden().controlSize(.small)
+                Spacer()
+                OpenLink(title: "More") { model.room = .awake }
+            }
         }
-        .inkTile(glow: awake.isOn ? Theme.warm : nil)
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(awake.isOn ? Theme.warm.opacity(0.10) : .clear)
         .animation(.snappy, value: awake.isOn)
-    }
-
-    var memoryTile: some View {
-        let frac = Double(mon.memUsed) / Double(max(mon.memTotal, 1))
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                IconBadge(symbol: "memorychip", color: Theme.accent)
-                Spacer()
-                Mono("of \(fmt(Int64(mon.memTotal)))")
-            }
-            Spacer()
-            BigValue(value: "\(Int(frac * 100))", unit: "%", size: 32)
-            Text(frac > 0.85 ? "Memory is tight" : "Memory in use").font(.callout).foregroundStyle(.secondary)
-            Meter(fraction: frac, color: frac > 0.85 ? Theme.warn : Theme.accent).padding(.top, 10)
-        }
-        .tile()
-    }
-
-    var cpuTile: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top) {
-                IconBadge(symbol: "cpu", color: .teal)
-                Spacer()
-                ArrowButton { NSWorkspace.shared.open(URL(fileURLWithPath: "/System/Applications/Utilities/Activity Monitor.app")) }
-                    .help("Open Activity Monitor")
-            }
-            Spacer()
-            BigValue(value: "\(Int(mon.cpu * 100))", unit: "%", size: 32)
-            Text(mon.processes.first.map { "Busiest: \($0.name)" } ?? "Processor busy")
-                .font(.callout).foregroundStyle(.secondary).lineLimit(1)
-            Meter(fraction: mon.cpu, color: .teal).padding(.top, 10)
-        }
-        .tile()
-    }
-
-    var networkTile: some View {
-        let down = sizeParts(Int64(mon.rxRate))
-        return VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Label("Network", systemImage: "dot.radiowaves.left.and.right")
-                    .font(.callout.weight(.medium)).foregroundStyle(.white.opacity(0.7))
-                Spacer()
-                Mono("\(mon.ports.count) listening ports")
-            }
-            Spacer()
-            BigValue(value: down.0, unit: "\(down.1)/s down", size: 34)
-            HStack {
-                let up = sizeParts(Int64(mon.txRate))
-                Text("↑ \(up.0) \(up.1)/s up").font(.callout.monospacedDigit()).foregroundStyle(.white.opacity(0.6))
-                Spacer()
-                if let top = mon.processes.first {
-                    Mono("top: \(top.name)")
-                }
-            }
-            .padding(.top, 4)
-        }
-        .inkTile(glow: Theme.accent.opacity(0.8))
     }
 
     // MARK: Biggest
@@ -349,8 +290,11 @@ struct HomeRoom: View {
             .padding(.bottom, 8)
             if let root = model.root {
                 ForEach(Array(root.children.prefix(7).enumerated()), id: \.element.id) { i, c in
-                    if i > 0 { Divider().opacity(0.5) }
+                    if i > 0 { Divider().overlay(Theme.line) }
                     HStack(spacing: 12) {
+                        Text("\(i + 1)")
+                            .font(.system(size: 15, design: .serif)).foregroundStyle(.tertiary)
+                            .frame(width: 16, alignment: .trailing)
                         FileIcon(path: c.path, aggregate: c.isAggregate, size: 26)
                         Button { if c.isDir { model.open(c) } } label: {
                             HStack(spacing: 6) {
@@ -362,13 +306,13 @@ struct HomeRoom: View {
                         .buttonStyle(.plain)
                         .help(Advisor.explain(c.path, name: c.name)?.text ?? "")
                         Spacer()
-                        Meter(fraction: Double(c.size) / Double(max(root.size, 1))).frame(width: 110)
+                        Meter(fraction: max(0.03, Double(c.size) / Double(max(root.size, 1))), height: 8, count: 14).frame(width: 120)
                         Text(fmt(c.size)).monospacedDigit().frame(width: 80, alignment: .trailing)
                         if c.isAggregate { Color.clear.frame(width: 70) } else {
                             StageButton(path: c.path, name: c.name, size: c.size, source: "Home")
                         }
                     }
-                    .padding(.vertical, 6)
+                    .padding(.vertical, 7)
                 }
             }
         }
@@ -376,7 +320,7 @@ struct HomeRoom: View {
     }
 
     func sectionTitle(_ text: String) -> some View {
-        Text(text).font(.title3.weight(.semibold))
+        Text(text).font(.system(size: 22, weight: .regular, design: .serif))
     }
 
     func pickFolder() {
@@ -388,42 +332,62 @@ struct HomeRoom: View {
     }
 }
 
-/// One of the cards along the top of Home: a number, what it means, and what to do about it.
-struct InsightCard: View {
-    let value: String
-    var unit: String = ""
-    var meter: Double? = nil
-    var meterColor: Color = Theme.accent
-    var corner: String = ""
+/// One line of "Worth doing": what it is, how big, and the button that deals with it.
+struct TodoRow: View {
+    let symbol: String
+    let color: Color
     let title: String
+    let value: String
     let detail: String
     let action: String
-    var urgent = false
+    var primary = false
     var disabled = false
     let perform: () -> Void
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .firstTextBaseline) {
-                BigValue(value: value, unit: unit, size: 28)
-                Spacer()
-                Mono(corner)
+        HStack(spacing: 12) {
+            Glyph(symbol: symbol, color: color)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
+                    Text(title).font(.body.weight(.semibold))
+                    Text(value).font(.system(size: 15, design: .serif)).monospacedDigit().foregroundStyle(color)
+                }
+                Text(detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
             }
-            if let meter {
-                Meter(fraction: meter, color: meterColor, height: 4).padding(.top, 8)
-            } else {
-                Rectangle().fill(.clear).frame(height: 12)
-            }
-            Text(title).font(.body.weight(.semibold)).padding(.top, 12).lineLimit(1)
-            Text(detail).font(.callout).foregroundStyle(.secondary).lineLimit(2, reservesSpace: true).padding(.top, 2)
-            Spacer(minLength: 14)
+            Spacer(minLength: 8)
             Button(action, action: perform)
-                .buttonStyle(PillButtonStyle(color: urgent ? Theme.warn : Theme.accent, filled: urgent))
+                .buttonStyle(PillButtonStyle(color: primary ? Theme.accent : .secondary, filled: primary))
                 .disabled(disabled)
-                .opacity(disabled ? 0.5 : 1)
+                .opacity(disabled ? 0.45 : 1)
         }
-        .frame(height: 172)
-        .tile(padding: 18)
+        .padding(.vertical, 12)
+    }
+}
+
+/// One cell of the "right now" strip.
+struct VitalCell: View {
+    let symbol: String
+    let label: String
+    let value: String
+    var unit = ""
+    let note: String
+    let fraction: Double?
+    let color: Color
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Label(label, systemImage: symbol).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            BigValue(value: value, unit: unit, size: 30).padding(.top, 10)
+            Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 10)
+            if let fraction {
+                Meter(fraction: fraction, color: color, height: 6, count: 14)
+            } else {
+                Color.clear.frame(height: 6)
+            }
+        }
+        .padding(18)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -620,7 +584,7 @@ struct CleanRoom: View {
                                 else { items.forEach { model.stage(path: $0.url.path, name: $0.name, size: $0.size, source: cat.title) } }
                             }
                             .disabled(items.isEmpty)
-                            .tint(stagedAll ? .green : nil)
+                            .tint(stagedAll ? Theme.good : nil)
                         }
                         .padding(.vertical, 6)
                     }
@@ -718,13 +682,16 @@ struct FullDiskAccessCard: View {
 
     var body: some View {
         HStack(spacing: 10) {
-            Image(systemName: "hand.raised.circle").font(.title3).foregroundStyle(Theme.warn)
+            Glyph(symbol: "hand.raised", color: Theme.warm, size: 28)
             Text("Roomy can't see protected folders like the Trash and Mail, so some sizes look smaller.")
                 .font(.callout).foregroundStyle(.secondary)
             Spacer()
-            Button("Allow…") { openFullDiskAccess() }.buttonStyle(PillButtonStyle())
+            Button("Allow…") { openFullDiskAccess() }.buttonStyle(PillButtonStyle(filled: true))
             Button("Relaunch") { model.relaunch() }.buttonStyle(PillButtonStyle(color: .secondary))
                 .help("After switching Roomy on in Full Disk Access, relaunch so it takes effect")
         }
+        .padding(12)
+        .background(Theme.warm.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.warm.opacity(0.3), lineWidth: 1))
     }
 }
