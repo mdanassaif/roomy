@@ -5,9 +5,13 @@ import AppKit
 /// and space drawn as rows of little blocks, like rooms in a floor plan.
 /// Every colour has a light and a dark value, so both modes are first-class.
 enum Theme {
-    static let canvas = dynamic(light: (0.962, 0.949, 0.925), dark: (0.082, 0.078, 0.071))
-    static let card = dynamic(light: (0.995, 0.991, 0.980), dark: (0.129, 0.123, 0.112))
-    static let line = dynamic(light: (0.875, 0.855, 0.815), dark: (0.235, 0.224, 0.204))
+    /// The window frame behind the sidebar and around the page panel.
+    static let chrome = dynamic(light: (0.905, 0.892, 0.866), dark: (0.058, 0.056, 0.052))
+    /// The page itself: one sheet of paper, inset from the frame.
+    static let canvas = dynamic(light: (0.995, 0.991, 0.980), dark: (0.112, 0.107, 0.098))
+    /// Cards sit on the page as a soft fill, no outline.
+    static let card = dynamic(light: (0.958, 0.946, 0.922), dark: (0.150, 0.144, 0.133))
+    static let line = dynamic(light: (0.885, 0.866, 0.828), dark: (0.210, 0.201, 0.185))
     static let empty = dynamic(light: (0.915, 0.900, 0.870), dark: (0.200, 0.191, 0.175))
 
     static let accent = dynamic(light: (0.855, 0.330, 0.200), dark: (0.980, 0.510, 0.365))
@@ -28,12 +32,11 @@ enum Theme {
 }
 
 extension View {
-    /// A paper card with a hairline edge. No drop shadow: the edge does the work.
+    /// A soft filled card on the page. No outline, no shadow.
     func tile(padding: CGFloat = 20) -> some View {
         self.padding(padding)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
             .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
     }
 
     /// A card washed with a colour, for things that are "on" right now (Keep Awake, charging).
@@ -50,7 +53,7 @@ extension View {
                     }
             }
             .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
-                .strokeBorder(color.map { $0.opacity(0.45) } ?? Theme.line, lineWidth: 1))
+                .strokeBorder(color.map { $0.opacity(0.35) } ?? Color.clear, lineWidth: 1))
     }
 }
 

@@ -13,7 +13,12 @@ struct RoomyApp: App {
                 .environment(model)
                 .environment(monitor)
                 .environment(awake)
+                .task {
+                    NotchController.shared.install(model: model, monitor: monitor, awake: awake)
+                    DebugSnapshot.scheduleIfAsked(model: model)
+                }
         }
+        .windowStyle(.hiddenTitleBar)
         .defaultSize(width: 1080, height: 740)
 
         MenuBarExtra {
@@ -41,32 +46,8 @@ struct ContentView: View {
 
     var body: some View {
         @Bindable var model = model
-        NavigationSplitView {
-            List(selection: Binding(get: { model.room }, set: { if let r = $0 { model.room = r } })) {
-                item(.home)
-                Section("Your files") {
-                    item(.clean)
-                    item(.storage)
-                }
-                Section("Apps") {
-                    item(.apps)
-                }
-                Section("This Mac") {
-                    item(.awake)
-                }
-            }
-            .navigationSplitViewColumnWidth(min: 180, ideal: 200)
-            .safeAreaInset(edge: .bottom) {
-                VStack(alignment: .leading, spacing: 6) {
-                    HStack(alignment: .firstTextBaseline, spacing: 4) {
-                        Text(sizeParts(model.volume.free).0).font(.system(size: 22, design: .serif)).monospacedDigit()
-                        Text("\(sizeParts(model.volume.free).1) free").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                    }
-                    DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 7, count: 16)
-                }
-                .padding(16)
-            }
-        } detail: {
+        HStack(spacing: 0) {
+            sidebar
             ZStack(alignment: .bottom) {
                 Group {
                     switch model.room {
@@ -108,7 +89,12 @@ struct ContentView: View {
             }
             .animation(.snappy, value: model.queue.isEmpty)
             .animation(.snappy, value: model.toast)
+            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
+            .padding([.top, .bottom, .trailing], 10)
         }
+        .background(Theme.chrome)
+        .ignoresSafeArea()
+        .background(WindowTweaks())
         .tint(Theme.accent)
         .sheet(isPresented: $model.showReview) { ReviewSheet().environment(model).tint(Theme.accent) }
         .frame(minWidth: 900, minHeight: 600)
@@ -123,21 +109,77 @@ struct ContentView: View {
         }
     }
 
-    func item(_ r: Room) -> some View {
-        Label(r.title, systemImage: r == .awake && awake.isOn ? "cup.and.heat.waves.fill" : r.icon)
-            .badge(badge(for: r))
-            .tag(r)
+    /// One flat list of rooms, the free space as one quiet line at the bottom.
+    var sidebar: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ForEach(Room.allCases) { item($0) }
+            Spacer()
+            VStack(alignment: .leading, spacing: 7) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Text(sizeParts(model.volume.free).0).font(.system(size: 18, design: .serif)).monospacedDigit()
+                    Text("\(sizeParts(model.volume.free).1) free").font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 6, count: 16)
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 16)
+        }
+        .padding(.top, 52)
+        .padding(.horizontal, 10)
+        .frame(width: 210)
     }
 
-    func badge(for r: Room) -> Text? {
+    func item(_ r: Room) -> some View {
+        let selected = model.room == r
+        return Button { model.room = r } label: {
+            HStack(spacing: 10) {
+                Image(systemName: r == .awake && awake.isOn ? "cup.and.heat.waves.fill" : r.icon)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundStyle(selected ? Theme.accent : .secondary)
+                    .frame(width: 18)
+                Text(r.title)
+                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .foregroundStyle(.primary)
+                Spacer(minLength: 4)
+                if let b = badge(for: r) {
+                    Text(b).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                }
+            }
+            .lineLimit(1)
+            .padding(.horizontal, 10)
+            .frame(height: 32)
+            .background(selected ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    func badge(for r: Room) -> String? {
         switch r {
-        case .clean where model.smartBytes > 0: Text(fmt(model.smartBytes))
+        case .clean where model.smartBytes > 0: fmt(model.smartBytes)
         case .apps where !model.sparkleUpdates.isEmpty || !model.brewOutdated.isEmpty:
-            Text("\(model.sparkleUpdates.count + model.brewOutdated.count)")
-        case .awake where awake.isOn: Text("On")
+            "\(model.sparkleUpdates.count + model.brewOutdated.count)"
+        case .awake where awake.isOn: "On"
         default: nil
         }
     }
+}
+
+/// Lets the window be dragged from its frame, since the title bar is hidden.
+struct WindowTweaks: NSViewRepresentable {
+    func makeNSView(context: Context) -> NSView {
+        let v = NSView()
+        DispatchQueue.main.async {
+            guard let w = v.window else { return }
+            w.isMovableByWindowBackground = true
+            w.titlebarAppearsTransparent = true
+            w.titleVisibility = .hidden
+            w.backgroundColor = NSColor(Theme.chrome)
+        }
+        return v
+    }
+    func updateNSView(_ nsView: NSView, context: Context) {}
 }
 
 // MARK: - Menu bar

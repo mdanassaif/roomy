@@ -5,20 +5,17 @@ import ServiceManagement
 // MARK: - Applications
 
 struct AppsRoom: View {
-    enum Tab: String, CaseIterable { case updates = "Updates", startup = "Startup", all = "All Apps" }
+    enum Tab: String, CaseIterable { case all = "Installed", startup = "Startup", updates = "Updates" }
     @Environment(AppModel.self) private var model
-    @State private var tab: Tab = .updates
+    @State private var tab: Tab = ProcessInfo.processInfo.environment["ROOMY_TAB"].flatMap(Tab.init(rawValue:)) ?? .all
     @State private var sortBySize = true
 
     var body: some View {
-        VStack(spacing: 0) {
-            RoomHeader(room: .apps, subtitle: "Updates, startup items and uninstalling, in one place") {
-                Picker("", selection: $tab) {
-                    ForEach(Tab.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .frame(width: 280)
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            RoomHeader(room: .apps, subtitle: "What's installed, what starts with your Mac, and what's out of date") { EmptyView() }
+            summary
+                .padding(.horizontal, 32)
+                .padding(.bottom, 14)
             switch tab {
             case .updates: updates
             case .startup: startup
@@ -31,83 +28,125 @@ struct AppsRoom: View {
         }
     }
 
-    // Updates
-    var updates: some View {
-        List {
-            HStack {
-                VStack(alignment: .leading, spacing: 2) {
-                    if let d = model.lastUpdateCheck {
-                        Text("Checked \(d.formatted(.relative(presentation: .named)))").font(.headline)
-                    } else {
-                        Text("Look for newer versions").font(.headline)
-                    }
-                    Text("Asks each app's own update feed (Sparkle) and Homebrew. This is the only time Roomy uses the network.")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if model.checkingUpdates { ProgressView().controlSize(.small) }
-                Button(model.checkingUpdates ? "Checking…" : "Check for Updates") { model.checkUpdates() }
-                    .buttonStyle(.borderedProminent)
-                    .disabled(model.checkingUpdates)
-            }
-            .padding(.vertical, 8)
-
-            if model.lastUpdateCheck != nil {
-                Section("From the app's own feed") {
-                    if model.sparkleUpdates.isEmpty {
-                        Text("Everything is up to date").foregroundStyle(.secondary)
-                    }
-                    ForEach(model.sparkleUpdates) { a in
-                        HStack {
-                            FileIcon(path: a.path, size: 28)
-                            VStack(alignment: .leading) {
-                                Text(a.name).font(.headline)
-                                Text("\(a.version) → \(a.latest ?? "?")").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            Button("Open to Update") {
-                                NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: a.path), configuration: .init())
-                            }
-                            .help("Opens the app. Most Sparkle apps offer the update on launch, or under the app menu › Check for Updates")
-                        }
-                    }
-                }
-                Section {
-                    if Shell.brew == nil {
-                        Text("Homebrew isn't installed").foregroundStyle(.secondary)
-                    } else if model.brewOutdated.isEmpty {
-                        Text("Everything is up to date").foregroundStyle(.secondary)
-                    }
-                    ForEach(model.brewOutdated) { b in
-                        HStack {
-                            Image(systemName: b.isCask ? "macwindow" : "terminal").frame(width: 28)
-                            VStack(alignment: .leading) {
-                                Text(b.name).font(.headline)
-                                Text("\(b.installed) → \(b.current)").font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if model.busy.contains(b.id) {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Button("In Terminal") { model.upgradeInTerminal(b) }.buttonStyle(.link)
-                                Button("Update") { model.upgrade(b) }
-                            }
-                        }
-                    }
-                } header: {
-                    HStack {
-                        Text("Homebrew")
-                        Spacer()
-                        if model.brewOutdated.count > 1 {
-                            Button("Update All") { model.brewOutdated.forEach { model.upgrade($0) } }.buttonStyle(.link)
-                        }
-                    }
-                }
-            }
+    /// Three tiles that are also the tabs: each says what's in it before you open it.
+    var summary: some View {
+        let total = model.apps.reduce(Int64(0)) { $0 + ($1.size ?? 0) }
+        let running = model.startup.filter { $0.enabled }
+        let atLogin = running.filter { $0.kind == .loginItem }.count
+        let updates = model.sparkleUpdates.count + model.brewOutdated.count
+        return HStack(spacing: 12) {
+            SummaryTile(symbol: "square.stack.3d.up", title: "Installed",
+                        value: model.appsLoading && model.apps.isEmpty ? "…" : "\(model.apps.count)", unit: "apps",
+                        note: model.sizingApps ? "Measuring…" : "\(fmt(total)) on disk",
+                        selected: tab == .all) { tab = .all }
+            SummaryTile(symbol: "power", title: "Startup",
+                        value: "\(running.count)", unit: "running",
+                        note: "\(atLogin) at login · \(running.count - atLogin) in the background",
+                        selected: tab == .startup) { tab = .startup }
+            SummaryTile(symbol: "arrow.down.circle", title: "Updates",
+                        value: model.lastUpdateCheck == nil ? "–" : "\(updates)", unit: model.lastUpdateCheck == nil ? "" : "waiting",
+                        note: model.checkingUpdates ? "Checking…" : model.lastUpdateCheck.map { "Checked \($0.formatted(.relative(presentation: .named)))" } ?? "Not checked yet",
+                        highlight: updates > 0,
+                        selected: tab == .updates) { tab = .updates }
         }
-        .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-        .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // Updates
+    @ViewBuilder
+    var updates: some View {
+        if model.lastUpdateCheck == nil && !model.checkingUpdates {
+            let feeds = model.apps.filter { $0.feedURL != nil && !$0.isAppStore }.count
+            VStack(spacing: 12) {
+                Image(systemName: "arrow.down.circle").font(.system(size: 30, weight: .light)).foregroundStyle(Theme.accent)
+                Text("Find newer versions").font(.system(size: 26, design: .serif))
+                Text("Roomy asks \(feeds > 0 ? "\(feeds) apps" : "each app") through their own update feeds\(Shell.brew == nil ? "" : ", plus Homebrew"). It's the only time Roomy goes online.")
+                    .font(.callout).foregroundStyle(.secondary)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 420)
+                Button("Check for Updates") { model.checkUpdates() }
+                    .buttonStyle(PillButtonStyle(color: Theme.accent, filled: true))
+                    .padding(.top, 6)
+            }
+            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            .padding(.bottom, 80)
+        } else {
+            List {
+                HStack {
+                    if model.checkingUpdates {
+                        ProgressView().controlSize(.small)
+                        Text("Asking update feeds…").foregroundStyle(.secondary)
+                    } else if let d = model.lastUpdateCheck {
+                        Text("Checked \(d.formatted(.relative(presentation: .named)))").foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Check Again") { model.checkUpdates() }
+                        .buttonStyle(PillButtonStyle(color: .secondary))
+                        .disabled(model.checkingUpdates)
+                }
+                .padding(.vertical, 4)
+                .listRowSeparator(.hidden)
+
+                if model.lastUpdateCheck != nil {
+                    Section("From each app's own feed") {
+                        if model.sparkleUpdates.isEmpty {
+                            Label("Everything is up to date", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                        }
+                        ForEach(model.sparkleUpdates) { a in
+                            HStack(spacing: 12) {
+                                FileIcon(path: a.path, size: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(a.name).font(.body.weight(.semibold))
+                                    Text("\(a.version) → \(a.latest ?? "?")").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                Button("Open to Update") {
+                                    NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: a.path), configuration: .init())
+                                }
+                                .buttonStyle(PillButtonStyle(color: Theme.accent))
+                                .help("Opens the app. Most apps offer the update on launch, or under the app menu › Check for Updates")
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    }
+                    Section {
+                        if Shell.brew == nil {
+                            Text("Homebrew isn't installed").foregroundStyle(.secondary)
+                        } else if model.brewOutdated.isEmpty {
+                            Label("Everything is up to date", systemImage: "checkmark.circle").foregroundStyle(.secondary)
+                        }
+                        ForEach(model.brewOutdated) { b in
+                            HStack(spacing: 12) {
+                                Image(systemName: b.isCask ? "macwindow" : "terminal").foregroundStyle(.secondary).frame(width: 30)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(b.name).font(.body.weight(.semibold))
+                                    Text("\(b.installed) → \(b.current)").font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                                }
+                                Spacer()
+                                if model.busy.contains(b.id) {
+                                    ProgressView().controlSize(.small)
+                                } else {
+                                    Button("In Terminal") { model.upgradeInTerminal(b) }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                                    Button("Update") { model.upgrade(b) }.buttonStyle(PillButtonStyle(color: Theme.accent))
+                                }
+                            }
+                            .padding(.vertical, 3)
+                        }
+                    } header: {
+                        HStack {
+                            Text("Homebrew")
+                            Spacer()
+                            if model.brewOutdated.count > 1 {
+                                Button("Update All") { model.brewOutdated.forEach { model.upgrade($0) } }.buttonStyle(.link)
+                            }
+                        }
+                    }
+                }
+            }
+            .listStyle(.inset)
+            .scrollContentBackground(.hidden)
+            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
+        }
     }
 
     // Startup
@@ -117,7 +156,8 @@ struct AppsRoom: View {
                 Text("Things that start with your Mac use memory and battery. Switching one off doesn't uninstall it.")
                     .font(.caption).foregroundStyle(.secondary)
                 Spacer()
-                Button { model.loadStartup() } label: { Label("Refresh", systemImage: "arrow.clockwise") }
+                Button { model.loadStartup() } label: { Image(systemName: "arrow.clockwise") }
+                    .buttonStyle(.borderless).help("Refresh")
             }
             ForEach([StartupItem.Kind.loginItem, .userAgent, .globalAgent, .daemon], id: \.self) { kind in
                 let items = model.startup.filter { $0.kind == kind }
@@ -135,7 +175,7 @@ struct AppsRoom: View {
                                 if model.busy.contains(item.id) {
                                     ProgressView().controlSize(.small)
                                 } else if kind == .loginItem {
-                                    Button("Remove") { model.setStartup(item, false) }
+                                    Button("Remove") { model.setStartup(item, false) }.buttonStyle(PillButtonStyle(color: .secondary))
                                 } else {
                                     Toggle("", isOn: Binding(get: { item.enabled }, set: { model.setStartup(item, $0) }))
                                         .toggleStyle(.switch)
@@ -158,11 +198,11 @@ struct AppsRoom: View {
         let apps = sortBySize ? model.apps.sorted { ($0.size ?? 0) > ($1.size ?? 0) } : model.apps
         return VStack(spacing: 0) {
             HStack {
-                Text("\(model.apps.count) apps · \(fmt(model.apps.reduce(0) { $0 + ($1.size ?? 0) }))").foregroundStyle(.secondary)
                 if model.sizingApps { ProgressView().controlSize(.small); Text("measuring…").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
                 Toggle("Sort by size", isOn: $sortBySize).toggleStyle(.checkbox)
             }
+            .font(.callout)
             .padding(.horizontal, 32)
             .padding(.bottom, 6)
             List(apps) { a in
@@ -185,8 +225,9 @@ struct AppsRoom: View {
                             model.stageUninstall(a)
                         }
                     }
-                    .tint(staged ? Theme.good : nil)
+                    .buttonStyle(PillButtonStyle(color: staged ? Theme.good : .secondary))
                     .disabled(a.bundleID.hasPrefix("com.apple."))
+                    .opacity(a.bundleID.hasPrefix("com.apple.") ? 0.4 : 1)
                     .help("Adds the app plus its support files, caches and preferences to your clean list")
                 }
                 .padding(.vertical, 2)
@@ -447,6 +488,9 @@ struct SettingsView: View {
                         openAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 Toggle("Save a snapshot after every scan", isOn: $model.autoSnapshot)
+                if NotchController.notchScreen() != nil {
+                    Toggle("Show overview from the notch", isOn: $model.notchOverview)
+                }
             }
             Section {
                 LabeledContent("Lid-closed mode") {
@@ -467,5 +511,41 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+
+/// A tab that says what's behind it: a count, a unit and one line of detail.
+struct SummaryTile: View {
+    let symbol: String
+    let title: String
+    let value: String
+    var unit = ""
+    let note: String
+    var highlight = false
+    let selected: Bool
+    let action: () -> Void
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 0) {
+                Label(title, systemImage: symbol)
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(selected ? Theme.accent : .secondary)
+                BigValue(value: value, unit: unit, size: 30)
+                    .foregroundStyle(highlight ? Theme.accent : .primary)
+                    .padding(.top, 8)
+                Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                    .padding(.top, 2)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(selected ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
+                .strokeBorder(selected ? Color.clear : Theme.line, lineWidth: 1))
+            .contentShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        }
+        .buttonStyle(.plain)
+        .animation(.easeOut(duration: 0.15), value: selected)
     }
 }

@@ -46,7 +46,14 @@ struct QueueItem: Identifiable, Hashable {
 final class AppModel {
     var room: Room = .home
     var storageTab: StorageTab = .folders
-    var volume = VolumeInfo.current()
+    var volume = VolumeInfo.current() {
+        didSet {
+            SpaceLog.record(free: volume.free)
+            let f = Forecast.make(log: SpaceLog.load(), free: volume.free)
+            if f != forecast { forecast = f }
+        }
+    }
+    var forecast = Forecast.make(log: SpaceLog.load(), free: VolumeInfo.current().free)
 
     // Scan
     var root: FileNode?
@@ -95,6 +102,12 @@ final class AppModel {
 
     var autoSnapshot: Bool = UserDefaults.standard.object(forKey: "autoSnapshot") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoSnapshot, forKey: "autoSnapshot") }
+    }
+    var notchOverview: Bool = UserDefaults.standard.object(forKey: "notchOverview") as? Bool ?? true {
+        didSet {
+            UserDefaults.standard.set(notchOverview, forKey: "notchOverview")
+            MainActor.assumeIsolated { NotchController.shared.refresh() }
+        }
     }
     var appearance: String = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
         didSet { UserDefaults.standard.set(appearance, forKey: "appearance"); applyAppearance() }
