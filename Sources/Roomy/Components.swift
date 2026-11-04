@@ -5,14 +5,12 @@ struct DiskBar: View {
     let total: Int64
     let used: Int64
     var staged: Int64 = 0
-    var height: CGFloat = 14
-    var count = 30
+    var height: CGFloat = 6
 
     var body: some View {
         let t = Double(max(total, 1))
         let s = Double(min(staged, used)) / t
-        BlockBar(parts: [(Double(used) / t - s, Theme.accent), (s, Theme.good)], count: count, height: height)
-            .animation(.snappy, value: staged)
+        StackBar(parts: [(Double(used) / t - s, Theme.accent), (s, Theme.good)], height: height)
     }
 }
 
@@ -36,13 +34,9 @@ struct StageButton: View {
             Button {
                 model.toggle(path: path, name: name, size: size, source: source)
             } label: {
-                Label(queued || covered ? "Added" : "Add", systemImage: queued || covered ? "checkmark" : "plus")
-                    .font(.caption.weight(.semibold))
-                    .frame(width: 58)
+                Text(queued || covered ? "Added" : "Add").frame(minWidth: 40)
             }
-            .buttonStyle(.bordered)
-            .controlSize(.small)
-            .tint(queued || covered ? Theme.good : nil)
+            .buttonStyle(ActionButtonStyle(color: queued || covered ? Theme.good : .primary))
             .disabled(covered)
             .frame(width: 70)
             .help(queued ? "Remove from your clean list" : covered ? "Its folder is already on your clean list" : "Add to your clean list. Nothing is deleted until you review it.")
@@ -55,11 +49,19 @@ struct FileIcon: View {
     var aggregate = false
     var size: CGFloat = 18
 
+    private static let cache = NSCache<NSString, NSImage>()
+    private static func icon(_ path: String) -> NSImage {
+        if let hit = cache.object(forKey: path as NSString) { return hit }
+        let image = NSWorkspace.shared.icon(forFile: path)
+        cache.setObject(image, forKey: path as NSString)
+        return image
+    }
+
     var body: some View {
         if aggregate {
             Image(systemName: "square.stack.3d.up").foregroundStyle(.secondary).frame(width: size, height: size)
         } else {
-            Image(nsImage: NSWorkspace.shared.icon(forFile: path)).resizable().frame(width: size, height: size)
+            Image(nsImage: Self.icon(path)).resizable().frame(width: size, height: size)
         }
     }
 }
@@ -69,7 +71,7 @@ struct SizeBar: View {
     var color: Color = Theme.accent
 
     var body: some View {
-        Meter(fraction: max(0.03, fraction), color: color, height: 7, count: 12).frame(width: 90)
+        StackBar(parts: [(max(0.02, fraction), color)], height: 4).frame(width: 80)
     }
 }
 
@@ -79,48 +81,129 @@ struct RoomHeader<Trailing: View>: View {
     @ViewBuilder var trailing: Trailing
 
     var body: some View {
-        HStack(alignment: .bottom, spacing: 12) {
-            VStack(alignment: .leading, spacing: 5) {
-                Text(room.title).font(.system(size: 32, weight: .regular, design: .serif)).tracking(-0.4)
-                Text(subtitle).font(.callout).foregroundStyle(.secondary).lineLimit(2)
+        HStack(alignment: .center, spacing: 12) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(room.title).font(.system(size: 20, weight: .semibold)).tracking(-0.2)
+                Text(subtitle).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
             }
-            Spacer()
+            Spacer(minLength: 16)
             trailing
         }
-        .padding(.horizontal, 32)
-        .padding(.top, 26)
-        .padding(.bottom, 16)
+        .padding(.horizontal, 28)
+        .padding(.top, 22)
+        .padding(.bottom, 14)
     }
 }
 
-struct Card<Content: View>: View {
-    var padding: CGFloat = 18
+/// A plain row that lights up under the pointer. Hover lives here so only this row redraws.
+struct HoverRow<Content: View>: View {
+    var height: CGFloat = 44
+    @ViewBuilder var content: Content
+    @State private var hovered = false
+
+    var body: some View {
+        HStack(spacing: 10) { content }
+            .padding(.horizontal, 10)
+            .frame(minHeight: height)
+            .background(hovered ? Color.primary.opacity(0.045) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
+            .onHover { hovered = $0 }
+    }
+}
+
+/// A scrolling column of rows. Only what's on screen gets built.
+struct RowList<Content: View>: View {
     @ViewBuilder var content: Content
     var body: some View {
-        content
-            .padding(padding)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) { content }
+                .padding(.horizontal, 18)
+                .padding(.bottom, 90)
+        }
+    }
+}
+
+/// Text tabs, styled like the sidebar.
+struct TabStrip<T: Hashable>: View {
+    @Binding var selection: T
+    let tabs: [(value: T, title: String)]
+
+    var body: some View {
+        HStack(spacing: 2) {
+            ForEach(tabs, id: \.value) { tab in
+                let on = tab.value == selection
+                Button { selection = tab.value } label: {
+                    Text(tab.title)
+                        .font(.system(size: 12.5, weight: on ? .medium : .regular))
+                        .foregroundStyle(on ? .primary : .secondary)
+                        .padding(.horizontal, 10)
+                        .frame(height: 26)
+                        .background(on ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+}
+
+/// When the results are from, or how a scan is going, and the way to scan again.
+/// Progress numbers are read here alone, so a running scan never redraws the page around it.
+struct ScanControl: View {
+    @Environment(AppModel.self) private var model
+
+    var body: some View {
+        HStack(spacing: 8) {
+            if model.scanning {
+                ProgressView().controlSize(.mini)
+                Text("Scanning \(model.scanFiles.formatted()) files").monospacedDigit().foregroundStyle(.secondary)
+                Button("Cancel") { model.cancelScan() }.buttonStyle(ActionButtonStyle(color: .secondary))
+            } else {
+                if let d = model.scanDate {
+                    Text("Updated \(d.formatted(.relative(presentation: .named)))").foregroundStyle(.secondary)
+                }
+                Menu {
+                    Button("My Files") { model.startScan(NSHomeDirectory()) }
+                    Button("Whole Mac") { model.startScan("/") }
+                    Button("A Folder…") { pick() }
+                } label: {
+                    Text("Scan")
+                } primaryAction: {
+                    model.startScan()
+                }
+                .menuStyle(.borderlessButton)
+                .fixedSize()
+            }
+        }
+        .font(.system(size: 12))
+        .lineLimit(1)
+    }
+
+    func pick() {
+        let p = NSOpenPanel()
+        p.canChooseDirectories = true
+        p.canChooseFiles = false
+        p.prompt = "Scan"
+        if p.runModal() == .OK, let u = p.url { model.startScan(u.path) }
     }
 }
 
 struct EmptyScanPrompt: View {
     @Environment(AppModel.self) private var model
     var body: some View {
-        ContentUnavailableView {
-            Label("No scan yet", systemImage: "internaldrive")
-        } description: {
-            Text("Scan your home folder or the whole disk to see where the space went.")
-        } actions: {
+        VStack(spacing: 10) {
             if model.scanning {
-                ProgressView("Scanning… \(model.scanFiles.formatted()) files, \(fmt(model.scanBytes))")
+                ProgressView().controlSize(.small)
+                Text("Scanning \(model.scanFiles.formatted()) files · \(fmt(model.scanBytes))")
+                    .font(.system(size: 12.5).monospacedDigit()).foregroundStyle(.secondary)
+                Text("This only takes a while the first time.").font(.system(size: 12)).foregroundStyle(.tertiary)
             } else {
-                HStack {
-                    Button("Scan Home Folder") { model.startScan(NSHomeDirectory()) }.buttonStyle(.borderedProminent)
-                    Button("Scan Entire Disk") { model.startScan("/") }
-                }
+                Text("Nothing scanned yet").font(.system(size: 13, weight: .medium))
+                Button("Scan My Files") { model.startScan(NSHomeDirectory()) }
+                    .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
             }
         }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 
@@ -131,116 +214,6 @@ func reveal(_ path: String) {
 func openFullDiskAccess() {
     if let u = URL(string: "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles") {
         NSWorkspace.shared.open(u)
-    }
-}
-
-extension Color {
-    static func treemap(_ i: Int) -> Color {
-        // Warm earth tones, like a coloured floor plan.
-        let tones: [Color] = [Theme.accent, Theme.warm, Theme.good, Theme.calm, Theme.accent.opacity(0.7), Theme.warm.opacity(0.7)]
-        return tones[i % tones.count]
-    }
-}
-
-// MARK: - Treemap
-
-enum Treemap {
-    static func layout(_ values: [Double], in rect: CGRect) -> [CGRect] {
-        var rects = [CGRect](repeating: .zero, count: values.count)
-        let total = values.reduce(0, +)
-        guard total > 0, rect.width > 0, rect.height > 0 else { return rects }
-        let areas = values.map { $0 / total * Double(rect.width * rect.height) }
-        var remaining = rect
-        var i = 0
-
-        func worst(_ row: [Double], _ side: Double) -> Double {
-            let s = row.reduce(0, +)
-            guard let mx = row.max(), let mn = row.min(), s > 0, mn > 0 else { return .infinity }
-            return max(side * side * mx / (s * s), (s * s) / (side * side * mn))
-        }
-
-        while i < areas.count {
-            let side = Double(min(remaining.width, remaining.height))
-            var row = [areas[i]]
-            var j = i + 1
-            while j < areas.count {
-                let next = row + [areas[j]]
-                if worst(next, side) <= worst(row, side) { row = next; j += 1 } else { break }
-            }
-            let sum = row.reduce(0, +)
-            if remaining.width >= remaining.height {
-                let w = CGFloat(sum) / remaining.height
-                var y = remaining.minY
-                for (k, a) in row.enumerated() {
-                    let h = CGFloat(a) / w
-                    rects[i + k] = CGRect(x: remaining.minX, y: y, width: w, height: h)
-                    y += h
-                }
-                remaining = CGRect(x: remaining.minX + w, y: remaining.minY, width: remaining.width - w, height: remaining.height)
-            } else {
-                let h = CGFloat(sum) / remaining.width
-                var x = remaining.minX
-                for (k, a) in row.enumerated() {
-                    let w = CGFloat(a) / h
-                    rects[i + k] = CGRect(x: x, y: remaining.minY, width: w, height: h)
-                    x += w
-                }
-                remaining = CGRect(x: remaining.minX, y: remaining.minY + h, width: remaining.width, height: remaining.height - h)
-            }
-            i = j
-        }
-        return rects
-    }
-}
-
-struct TreemapView: View {
-    @Environment(AppModel.self) private var model
-    let node: FileNode
-
-    var body: some View {
-        let _ = model.treeVersion
-        let kids = Array(node.children.filter { $0.size > 0 }.prefix(60))
-        GeometryReader { g in
-            let rects = Treemap.layout(kids.map { Double($0.size) }, in: CGRect(origin: .zero, size: g.size))
-            ZStack(alignment: .topLeading) {
-                ForEach(Array(kids.enumerated()), id: \.element.id) { i, child in
-                    let r = rects[i].insetBy(dx: 1.5, dy: 1.5)
-                    if r.width > 2 && r.height > 2 {
-                        let queued = model.isQueued(child.path) || model.isCovered(child.path)
-                        RoundedRectangle(cornerRadius: 4, style: .continuous)
-                            .fill(child.isAggregate ? Theme.empty : Color.treemap(i))
-                            .opacity(queued ? 0.45 : 1)
-                            .overlay {
-                                if queued {
-                                    RoundedRectangle(cornerRadius: 4, style: .continuous).strokeBorder(Theme.canvas, style: StrokeStyle(lineWidth: 3, dash: [5, 3]))
-                                }
-                            }
-                            .overlay(alignment: .topLeading) {
-                                if r.width > 60 && r.height > 30 {
-                                    VStack(alignment: .leading, spacing: 1) {
-                                        Text(child.name).font(.caption.bold()).lineLimit(1)
-                                        Text(fmt(child.size)).font(.caption2).opacity(0.85)
-                                    }
-                                    .foregroundStyle(.white)
-                                    .padding(6)
-                                }
-                            }
-                            .frame(width: r.width, height: r.height)
-                            .offset(x: r.minX, y: r.minY)
-                            .onTapGesture { if child.isDir { model.current = child } }
-                            .help("\(child.name) — \(fmt(child.size))")
-                            .contextMenu {
-                                if !child.isAggregate {
-                                    Button(queued ? "Remove from Queue" : "Add to Cleanup Queue") {
-                                        model.toggle(path: child.path, name: child.name, size: child.size, source: "Storage")
-                                    }
-                                    Button("Reveal in Finder") { reveal(child.path) }
-                                }
-                            }
-                    }
-                }
-            }
-        }
     }
 }
 

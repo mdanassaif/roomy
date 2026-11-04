@@ -27,104 +27,70 @@ struct AwakeRoom: View {
 
     var body: some View {
         Page {
-            VStack(alignment: .leading, spacing: 18) {
-                RoomHeader(room: .awake, subtitle: "Keep your Mac running for downloads, builds and remote sessions, even with the lid closed") { EmptyView() }
-
-                VStack(spacing: 16) {
-                    hero
-                    if let error = awake.lastError {
-                        Label(error, systemImage: "exclamationmark.triangle.fill")
-                            .foregroundStyle(Theme.warn)
-                            .frame(maxWidth: .infinity, alignment: .leading)
-                    }
-                    HStack(alignment: .top, spacing: 16) {
-                        lidTile
-                        rulesTile
-                    }
-                    .fixedSize(horizontal: false, vertical: true)
-                }
-                .padding(.horizontal, 32)
-                .padding(.bottom, 110)
-            }
-        }
-    }
-
-    var hero: some View {
-        HStack(alignment: .center, spacing: 28) {
             VStack(alignment: .leading, spacing: 0) {
-                HStack(spacing: 8) {
-                    Circle().fill(awake.isOn ? Theme.warm : Color.secondary.opacity(0.5)).frame(width: 7, height: 7)
-                    Eyebrow(awake.isOn ? (awake.lidClosedActive ? "On · lid closed is fine" : "On · keep the lid open") : "Off")
-                }
-                Text(awake.isOn ? "Staying awake" : "Sleeping normally")
-                    .font(.system(size: 44, weight: .regular, design: .serif)).tracking(-0.6)
-                    .padding(.top, 10)
-                TimelineView(.periodic(from: .now, by: 30)) { _ in
-                    Text(awake.statusLine).font(.title3).foregroundStyle(.secondary)
-                }
-                .padding(.top, 2)
-                HStack(spacing: 8) {
-                    Button(awake.isOn ? "Turn Off" : "Keep Awake") {
-                        withAnimation(.snappy) { awake.toggle() }
+                RoomHeader(room: .awake, subtitle: "Keep your Mac running for downloads, builds and remote sessions") { EmptyView() }
+                VStack(alignment: .leading, spacing: 28) {
+                    status
+                    if let error = awake.lastError {
+                        Label(error, systemImage: "exclamationmark.triangle").foregroundStyle(Theme.warn).font(.system(size: 12.5))
                     }
-                    .buttonStyle(PillButtonStyle(color: awake.isOn ? .secondary : Theme.warm, filled: !awake.isOn))
-                    Rectangle().fill(Theme.line).frame(width: 1, height: 22).padding(.horizontal, 4)
-                    ForEach(awakeDurations.dropLast(), id: \.title) { d in
-                        Button(d.title) { withAnimation(.snappy) { awake.turnOn(for: d.seconds) } }
-                            .buttonStyle(PillButtonStyle(color: .secondary))
-                    }
+                    lid
+                    rules
                 }
-                .padding(.top, 24)
+                .padding(.horizontal, 28)
+                .padding(.top, 8)
+                .padding(.bottom, 90)
             }
-            Spacer(minLength: 0)
-            ZStack {
-                Circle().strokeBorder(awake.isOn ? Theme.warm.opacity(0.35) : Theme.line, style: StrokeStyle(lineWidth: 1, dash: [3, 4]))
-                Circle().fill(awake.isOn ? Theme.warm.opacity(0.14) : Theme.empty).padding(18)
-                Image(systemName: awake.isOn ? "cup.and.heat.waves.fill" : "moon.stars.fill")
-                    .font(.system(size: 44, weight: .regular))
-                    .foregroundStyle(awake.isOn ? Theme.warm : .secondary)
-                    .symbolEffect(.pulse, isActive: awake.isOn)
-            }
-            .frame(width: 150, height: 150)
         }
-        .frame(minHeight: 240)
-        .washTile(padding: 30, color: awake.isOn ? Theme.warm : nil)
-        .animation(.snappy, value: awake.isOn)
     }
 
-    var lidTile: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack {
-                Glyph(symbol: "laptopcomputer", color: awake.lidSetupDone ? Theme.good : Theme.accent)
-                Spacer()
-                if awake.lidSetupDone { Label("Ready", systemImage: "checkmark").font(.caption.weight(.semibold)).foregroundStyle(Theme.good) }
+    var status: some View {
+        VStack(alignment: .leading, spacing: 14) {
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Circle().fill(awake.isOn ? Theme.good : Color.secondary.opacity(0.4)).frame(width: 8, height: 8)
+                    Text(awake.isOn ? "Staying awake" : "Sleeping normally").font(.system(size: 26, weight: .semibold)).tracking(-0.4)
+                }
+                TimelineView(.periodic(from: .now, by: 30)) { _ in
+                    Text(awake.statusLine).font(.system(size: 13)).foregroundStyle(.secondary)
+                }
             }
-            Text("Lid-closed mode").font(.system(size: 19, design: .serif)).padding(.top, 4)
+            HStack(spacing: 6) {
+                Button(awake.isOn ? "Turn Off" : "Keep Awake") { awake.toggle() }
+                    .buttonStyle(ActionButtonStyle(color: awake.isOn ? .primary : Theme.accent, filled: !awake.isOn))
+                ForEach(awakeDurations.dropLast(), id: \.title) { d in
+                    Button(d.title) { awake.turnOn(for: d.seconds) }.buttonStyle(ActionButtonStyle(color: .secondary))
+                }
+            }
+        }
+    }
+
+    var lid: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            HStack {
+                Eyebrow("Lid-closed mode")
+                if awake.lidSetupDone { Text("Ready").font(.system(size: 12)).foregroundStyle(Theme.good) }
+            }
             Text(awake.lidSetupDone
                  ? "Close the lid and your Mac keeps going, Wi-Fi included. Sleep goes back to normal when Keep Awake turns off."
                  : "Needs your password once. Roomy then allows only the two sleep commands it uses, nothing else.")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.system(size: 13))
                 .fixedSize(horizontal: false, vertical: true)
             if !awake.lidSetupDone {
-                Button("Set Up…") { awake.setUpLidClosed() }.buttonStyle(PillButtonStyle(filled: true)).padding(.top, 4)
+                Button("Set Up…") { awake.setUpLidClosed() }.buttonStyle(ActionButtonStyle()).padding(.top, 4)
             }
         }
-        .tile()
     }
 
-    var rulesTile: some View {
-        VStack(alignment: .leading, spacing: 10) {
-            Glyph(symbol: "shield.lefthalf.filled", color: Theme.calm)
-            Text("It turns itself off").font(.system(size: 19, design: .serif)).padding(.top, 4)
+    var rules: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Eyebrow("It turns itself off")
             rule("timer", "When your timer runs out")
             rule("battery.25percent", "On battery at \(KeepAwake.batteryMinOpen)%, or \(KeepAwake.batteryMinClosed)% with the lid closed")
             rule("thermometer.medium", "If it runs hot with the lid closed")
             rule("xmark.app", "When you quit Roomy")
-            if let last = awake.lastStop {
-                Eyebrow("Last time: \(last)").padding(.top, 2)
-            }
+            if let last = awake.lastStop { Eyebrow("Last time: \(last)").padding(.top, 2) }
         }
-        .tile()
     }
 
     func rule(_ icon: String, _ text: String) -> some View {
@@ -133,7 +99,7 @@ struct AwakeRoom: View {
         } icon: {
             Image(systemName: icon).foregroundStyle(.secondary).frame(width: 22)
         }
-        .font(.callout)
+        .font(.system(size: 13))
     }
 }
 

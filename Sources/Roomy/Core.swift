@@ -195,6 +195,11 @@ struct Scanner {
     }
 
     private func scanDir(_ url: URL, name: String, depth: Int) -> FileNode {
+        // Foundation's URL objects pile up across millions of files without this.
+        autoreleasepool { walkDir(url, name: name, depth: depth) }
+    }
+
+    private func walkDir(_ url: URL, name: String, depth: Int) -> FileNode {
         let node = FileNode(name: name, path: url.path, isDir: true)
         guard !progress.cancelled,
               let items = try? FileManager.default.contentsOfDirectory(at: url, includingPropertiesForKeys: Self.keys, options: [])
@@ -235,7 +240,12 @@ struct Scanner {
             sub = dirs.map { scanDir($0, name: $0.lastPathComponent, depth: depth + 1) }
         }
 
-        var children = sub + files
+        // Folders under the threshold fold into "smaller files": nothing to act on, and they'd bloat the tree.
+        for f in sub where f.size < Self.keepThreshold {
+            smallSize += f.size
+            smallCount += f.items
+        }
+        var children = sub.filter { $0.size >= Self.keepThreshold } + files
         if smallCount > 0 {
             children.append(FileNode(name: "\(smallCount) smaller files", path: url.path + "/·smaller", isDir: false,
                                      isAggregate: true, size: smallSize, items: smallCount))
@@ -282,33 +292,52 @@ final class SnapshotStore {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
         dir = base.appendingPathComponent("Roomy/Snapshots", isDirectory: true)
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-        load()
     }
 
-    func load() {
-        let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
-        let dec = JSONDecoder()
-        items = files.filter { $0.pathExtension == "json" }
-            .compactMap { try? dec.decode(Snapshot.self, from: Data(contentsOf: $0)) }
-            .sorted { $0.date > $1.date }
-    }
-
-    func save(from node: FileNode) {
-        var entries: [String: Int64] = [:]
-        func walk(_ n: FileNode, depth: Int) {
-            entries[n.path] = n.size
-            guard depth < 5 else { return }
-            for c in n.children {
-                if c.isDir && c.size >= 5_000_000 { walk(c, depth: depth + 1) }
-                else if !c.isDir && !c.isAggregate && c.size >= 100_000_000 { entries[c.path] = c.size }
+    /// Reads saved snapshots off the main thread; there can be dozens.
+    func load(done: @escaping () -> Void) {
+        let dir = dir
+        DispatchQueue.global(qos: .utility).async {
+            let files = (try? FileManager.default.contentsOfDirectory(at: dir, includingPropertiesForKeys: nil)) ?? []
+            let dec = JSONDecoder()
+            let list = files.filter { $0.pathExtension == "json" }
+                .compactMap { try? dec.decode(Snapshot.self, from: Data(contentsOf: $0)) }
+                .sorted { $0.date > $1.date }
+            DispatchQueue.main.async {
+                self.items = list
+                done()
             }
         }
-        walk(node, depth: 0)
-        let snap = Snapshot(id: UUID(), date: Date(), root: node.path, total: node.size, entries: entries)
-        if let data = try? JSONEncoder().encode(snap) {
-            try? data.write(to: dir.appendingPathComponent(snap.id.uuidString + ".json"))
+    }
+
+    /// Automatic snapshots: at most one every 12 hours per folder, however often scans run.
+    func saveIfDue(from node: FileNode, done: @escaping () -> Void = {}) {
+        if let last = items.first(where: { $0.root == node.path }), Date().timeIntervalSince(last.date) < 12 * 3600 { return }
+        save(from: node, done: done)
+    }
+
+    func save(from node: FileNode, done: @escaping () -> Void = {}) {
+        let dir = dir
+        DispatchQueue.global(qos: .utility).async {
+            var entries: [String: Int64] = [:]
+            func walk(_ n: FileNode, depth: Int) {
+                entries[n.path] = n.size
+                guard depth < 5 else { return }
+                for c in n.children {
+                    if c.isDir && c.size >= 5_000_000 { walk(c, depth: depth + 1) }
+                    else if !c.isDir && !c.isAggregate && c.size >= 100_000_000 { entries[c.path] = c.size }
+                }
+            }
+            walk(node, depth: 0)
+            let snap = Snapshot(id: UUID(), date: Date(), root: node.path, total: node.size, entries: entries)
+            if let data = try? JSONEncoder().encode(snap) {
+                try? data.write(to: dir.appendingPathComponent(snap.id.uuidString + ".json"))
+            }
+            DispatchQueue.main.async {
+                self.items.insert(snap, at: 0)
+                done()
+            }
         }
-        items.insert(snap, at: 0)
     }
 
     func delete(_ s: Snapshot) {

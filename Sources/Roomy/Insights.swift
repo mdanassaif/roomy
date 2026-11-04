@@ -10,10 +10,13 @@ struct SpaceSample: Codable {
 
 enum SpaceLog {
     private static let key = "spaceLog"
+    private static var cached: [SpaceSample]?
 
     static func load() -> [SpaceSample] {
-        guard let data = UserDefaults.standard.data(forKey: key) else { return [] }
-        return (try? JSONDecoder().decode([SpaceSample].self, from: data)) ?? []
+        if let cached { return cached }
+        let log = UserDefaults.standard.data(forKey: key).flatMap { try? JSONDecoder().decode([SpaceSample].self, from: $0) } ?? []
+        cached = log
+        return log
     }
 
     /// Adds a sample if the last one is over three hours old. Keeps about two months.
@@ -23,6 +26,7 @@ enum SpaceLog {
         if let last = log.last, now.timeIntervalSince(last.date) < 3 * 3600 { return }
         log.append(SpaceSample(date: now, free: free))
         if log.count > 500 { log.removeFirst(log.count - 500) }
+        cached = log
         if let data = try? JSONEncoder().encode(log) { UserDefaults.standard.set(data, forKey: key) }
     }
 }
@@ -72,7 +76,7 @@ extension SnapshotStore {
     /// Compares the newest scan of `root` with one from about a week before (at least a day older),
     /// and returns the few places that grew most, pointing at the folder that actually grew
     /// rather than its parents.
-    func grewLately(root: String) -> (since: Date, rows: [Growth])? {
+    static func grewLately(in items: [Snapshot], root: String) -> (since: Date, rows: [Growth])? {
         let same = items.filter { $0.root == root }.sorted { $0.date > $1.date }
         guard let new = same.first else { return nil }
         let target = new.date.addingTimeInterval(-7 * 86400)

@@ -8,7 +8,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp .build/release/Roomy "$APP/Contents/MacOS/Roomy"
 cp Info.plist "$APP/Contents/Info.plist"
-if [ ! -f build/AppIcon.icns ]; then
+if [ ! -f build/AppIcon.icns ] || [ makeicon.swift -nt build/AppIcon.icns ]; then
   swift makeicon.swift build/AppIcon.iconset
   iconutil -c icns build/AppIcon.iconset -o build/AppIcon.icns
 fi

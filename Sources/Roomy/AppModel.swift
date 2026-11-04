@@ -25,13 +25,24 @@ enum Room: String, CaseIterable, Identifiable {
 }
 
 enum StorageTab: String, CaseIterable {
-    case folders = "Folders", large = "Large Files", changes = "Changes"
+    case folders = "Folders", large = "Large Files", types = "File Types", duplicates = "Duplicates", changes = "Changes"
 }
 
 struct Toast: Equatable {
     let id = UUID()
     let text: String
     var canUndo = false
+}
+
+struct Suggestion: Identifiable {
+    enum Action { case cleanSafe, emptyTrash, openClean(String), openLarge }
+    let id: String
+    let title: String
+    let detail: String
+    let icon: String
+    let bytes: Int64
+    let button: String
+    let action: Action
 }
 
 struct QueueItem: Identifiable, Hashable {
@@ -48,6 +59,7 @@ final class AppModel {
     var storageTab: StorageTab = .folders
     var volume = VolumeInfo.current() {
         didSet {
+            guard volume != oldValue else { return }
             SpaceLog.record(free: volume.free)
             let f = Forecast.make(log: SpaceLog.load(), free: volume.free)
             if f != forecast { forecast = f }
@@ -66,6 +78,18 @@ final class AppModel {
     var scanDate: Date?
     var scanDuration: TimeInterval = 0
     var treeVersion = 0
+    /// What grew, and how many very large files exist. Worked out off the main thread after each scan.
+    var growth: (since: Date, rows: [Growth])?
+    var bigFiles: (count: Int, bytes: Int64) = (0, 0)
+    var fileTypes: [TypeGroup] = []
+    var searchIndex: [(key: String, node: FileNode)] = []
+    var showSearch = false
+
+    // Duplicates
+    var duplicates: [DuplicateGroup]?
+    var findingDuplicates = false
+    var duplicateProgress = 0.0
+    private var duplicateRun = UUID()
     private var progress: ScanProgress?
 
     // Queue
@@ -86,6 +110,7 @@ final class AppModel {
     // Clean
     var cleanResults: [String: [SizedItem]] = [:]
     var cleanLoading = false
+    var cleanExpanded: Set<String> = []
 
     // Apps
     var apps: [AppInfo] = []
@@ -103,22 +128,22 @@ final class AppModel {
     var autoSnapshot: Bool = UserDefaults.standard.object(forKey: "autoSnapshot") as? Bool ?? true {
         didSet { UserDefaults.standard.set(autoSnapshot, forKey: "autoSnapshot") }
     }
-    var notchOverview: Bool = UserDefaults.standard.object(forKey: "notchOverview") as? Bool ?? true {
-        didSet {
-            UserDefaults.standard.set(notchOverview, forKey: "notchOverview")
-            MainActor.assumeIsolated { NotchController.shared.refresh() }
-        }
-    }
     var appearance: String = UserDefaults.standard.string(forKey: "appearance") ?? "system" {
         didSet { UserDefaults.standard.set(appearance, forKey: "appearance"); applyAppearance() }
     }
 
     private var volumeTimer: Timer?
+    private var lastTrashCheck = Date.distantPast
 
     init() {
         volumeTimer = Timer.scheduledTimer(withTimeInterval: 30, repeats: true) { [weak self] _ in
-            self?.volume = .current()
+            self?.refreshVolume()
         }
+    }
+
+    func refreshVolume() {
+        let v = VolumeInfo.current()
+        if v != volume { volume = v }
     }
 
     var menuBarText: String { fmt(volume.free) }
@@ -139,12 +164,89 @@ final class AppModel {
         }
     }
 
-    /// First launch of the window: measure the cleanable stuff and scan Home without being asked.
+    /// Opening the window: show the last results at once. Only look at the disk again when they're
+    /// over a day old, and then quietly, with the old results staying on screen.
     func autoStart() {
         guard !didAutoStart else { return }
         didAutoStart = true
-        refreshClean()
-        if root == nil { startScan(NSHomeDirectory()) }
+        snapshots.load { [weak self] in self?.updateInsights() }
+        DispatchQueue.global(qos: .userInitiated).async {
+            let saved = ScanCache.load()
+            let clean = CleanCache.load()
+            DispatchQueue.main.async {
+                if let clean { self.cleanResults = clean.results }
+                if clean.map({ Date().timeIntervalSince($0.date) > 3600 }) ?? true { self.refreshClean() }
+                guard let saved else {
+                    self.startScan(NSHomeDirectory())
+                    return
+                }
+                self.root = saved.root
+                self.current = saved.root
+                self.scanTarget = saved.root.path
+                self.scanDate = saved.date
+                self.treeVersion += 1
+                self.updateInsights()
+                if Date().timeIntervalSince(saved.date) > 86400 { self.startScan(quietly: true) }
+            }
+        }
+    }
+
+    func updateInsights() {
+        guard let root else { return }
+        let items = snapshots.items
+        DispatchQueue.global(qos: .utility).async {
+            let grew = SnapshotStore.grewLately(in: items, root: root.path)
+            var big: [FileNode] = []
+            root.files(atLeast: 500_000_000, into: &big)
+            let bytes = big.reduce(Int64(0)) { $0 + $1.size }
+            let types = FileTypes.group(root)
+            var index: [(key: String, node: FileNode)] = []
+            func walk(_ n: FileNode) {
+                for c in n.children where !c.isAggregate {
+                    index.append((c.name.lowercased(), c))
+                    if c.isDir { walk(c) }
+                }
+            }
+            walk(root)
+            index.sort { $0.node.size > $1.node.size }
+            DispatchQueue.main.async {
+                self.growth = grew
+                self.bigFiles = (big.count, bytes)
+                self.fileTypes = types
+                self.searchIndex = index
+            }
+        }
+    }
+
+    // MARK: Duplicates
+
+    func findDuplicates() {
+        guard let root, !findingDuplicates else { return }
+        let run = UUID()
+        duplicateRun = run
+        findingDuplicates = true
+        duplicateProgress = 0
+        DispatchQueue.global(qos: .utility).async {
+            let cancelled = { DispatchQueue.main.sync { self.duplicateRun != run } }
+            let found = Duplicates.find(root: root, isCancelled: cancelled) { p in
+                DispatchQueue.main.async { self.duplicateProgress = p }
+            }
+            DispatchQueue.main.async {
+                guard self.duplicateRun == run else { return }
+                self.duplicates = found
+                self.findingDuplicates = false
+            }
+        }
+    }
+
+    func cancelDuplicates() {
+        duplicateRun = UUID()
+        findingDuplicates = false
+    }
+
+    /// Keeps the newest copy, adds the rest to the clean list.
+    func stageExtras(_ group: DuplicateGroup) {
+        for f in group.files.dropFirst() { stage(path: f.path, name: f.name, size: f.size, source: "Duplicates") }
     }
 
     func relaunch() {
@@ -172,6 +274,48 @@ final class AppModel {
         smartItems.reduce(0) { $0 + $1.items.reduce(0) { $0 + $1.size } }
     }
 
+    /// Home's to-do list: everything worth doing about space right now, biggest first.
+    var suggestions: [Suggestion] {
+        var list: [Suggestion] = []
+        let smart = smartItems
+        if !smart.isEmpty {
+            let count = smart.reduce(0) { $0 + $1.items.count }
+            list.append(Suggestion(id: "smart", title: "Caches, logs and build files",
+                                   detail: "\(count) items that rebuild themselves or are no longer needed",
+                                   icon: "shippingbox", bytes: smartBytes, button: "Review", action: .cleanSafe))
+        }
+        if let t = trashSize, t > 0 {
+            list.append(Suggestion(id: "trash", title: "Empty the Trash", detail: "In the Trash, but still taking up space",
+                                   icon: "trash", bytes: t, button: "Empty", action: .emptyTrash))
+        }
+        for c in Cleaners.all where !Self.smartCategories.contains(c.id) {
+            let bytes = (cleanResults[c.id] ?? []).reduce(Int64(0)) { $0 + $1.size }
+            if bytes > 0 {
+                list.append(Suggestion(id: c.id, title: c.title, detail: c.detail, icon: c.icon, bytes: bytes,
+                                       button: "Look", action: .openClean(c.id)))
+            }
+        }
+        if bigFiles.count > 0 {
+            list.append(Suggestion(id: "big", title: "\(bigFiles.count) file\(bigFiles.count == 1 ? "" : "s") over 500 MB",
+                                   detail: "Check whether you still need them", icon: "doc", bytes: bigFiles.bytes,
+                                   button: "Look", action: .openLarge))
+        }
+        return list.sorted { $0.bytes > $1.bytes }
+    }
+
+    func run(_ action: Suggestion.Action) {
+        switch action {
+        case .cleanSafe: stageSmart()
+        case .emptyTrash: break
+        case .openClean(let id):
+            cleanExpanded.insert(id)
+            room = .clean
+        case .openLarge:
+            storageTab = .large
+            room = .storage
+        }
+    }
+
     func stageSmart(review: Bool = true) {
         for (c, items) in smartItems {
             for i in items { stage(path: i.url.path, name: i.name, size: i.size, source: c.title) }
@@ -181,7 +325,8 @@ final class AppModel {
 
     // MARK: Scan
 
-    func startScan(_ path: String? = nil) {
+    /// Results already on screen stay there until the new ones are ready. `quietly` runs at low priority.
+    func startScan(_ path: String? = nil, quietly: Bool = false) {
         if let path { scanTarget = path }
         guard !scanning else { return }
         scanning = true
@@ -192,25 +337,29 @@ final class AppModel {
         progress = prog
         let target = scanTarget
         let start = Date()
-        let timer = Timer.scheduledTimer(withTimeInterval: 0.25, repeats: true) { [weak self] _ in
+        let timer = Timer.scheduledTimer(withTimeInterval: 0.5, repeats: true) { [weak self] _ in
             let s = prog.snapshot
             self?.scanFiles = s.files
             self?.scanBytes = s.bytes
             self?.scanCurrent = s.current
         }
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: quietly ? .utility : .userInitiated).async {
             let node = Scanner(progress: prog).scan(path: target)
+            if !prog.cancelled { ScanCache.save(node) }
             DispatchQueue.main.async {
                 timer.invalidate()
                 self.scanning = false
                 guard !prog.cancelled else { return }
+                let here = self.current?.path
                 self.root = node
-                self.current = node
+                self.current = here.flatMap(node.find) ?? node
                 self.scanDate = Date()
                 self.scanDuration = Date().timeIntervalSince(start)
                 self.treeVersion += 1
-                self.volume = .current()
-                if self.autoSnapshot { self.snapshots.save(from: node) }
+                self.duplicates = nil
+                self.refreshVolume()
+                self.updateInsights()
+                if self.autoSnapshot { self.snapshots.saveIfDue(from: node) { [weak self] in self?.updateInsights() } }
             }
         }
     }
@@ -277,7 +426,13 @@ final class AppModel {
                 for it in ok { self.removeFromTree(it.path) }
                 self.treeVersion += 1
                 self.pruneClean(okPaths)
-                self.volume = .current()
+                self.saveTree()
+                self.updateInsights()
+                self.duplicates = self.duplicates?.compactMap { g in
+                    let left = g.files.filter { !okPaths.contains($0.path) }
+                    return left.count > 1 ? DuplicateGroup(id: g.id, size: g.size, files: left) : nil
+                }
+                self.refreshVolume()
                 self.refreshTrash()
                 let freed = ok.reduce(0) { $0 + $1.size }
                 var msg = emptyAfter ? "Deleted \(ok.count) items, \(fmt(freed)) freed" : "Moved \(ok.count) items (\(fmt(freed))) to the Trash"
@@ -300,11 +455,21 @@ final class AppModel {
                 restored += 1
             } catch {}
         }
-        volume = .current()
+        refreshVolume()
         refreshTrash()
         cleanResults = [:]
         refreshClean()
         flash(restored == moves.count ? "Put back \(restored) items. Rescan to see them in Storage." : "Put back \(restored) of \(moves.count) items. The rest are still in the Trash.")
+    }
+
+    /// After a clean, so the saved results match what's left.
+    private func saveTree() {
+        guard let root else { return }
+        let results = cleanResults
+        DispatchQueue.global(qos: .utility).async {
+            ScanCache.save(root, date: self.scanDate ?? Date())
+            CleanCache.save(results)
+        }
     }
 
     private func removeFromTree(_ path: String) {
@@ -322,14 +487,17 @@ final class AppModel {
 
     static let trashURL = URL(fileURLWithPath: NSHomeDirectory() + "/.Trash")
 
-    func refreshTrash() {
+    /// `force` is for after something changed the Trash. Otherwise at most once a minute, since it walks every file in there.
+    func refreshTrash(force: Bool = true) {
+        guard force || Date().timeIntervalSince(lastTrashCheck) > 60 else { return }
+        lastTrashCheck = Date()
         DispatchQueue.global(qos: .utility).async {
             let items = try? FileManager.default.contentsOfDirectory(at: Self.trashURL, includingPropertiesForKeys: nil)
             let size = items?.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
             DispatchQueue.main.async {
-                self.trashSize = size
-                self.trashCount = items?.count ?? 0
-                self.hasFullDiskAccess = items != nil
+                if self.trashSize != size { self.trashSize = size }
+                if self.trashCount != items?.count ?? 0 { self.trashCount = items?.count ?? 0 }
+                if self.hasFullDiskAccess != (items != nil) { self.hasFullDiskAccess = items != nil }
             }
         }
     }
@@ -356,7 +524,7 @@ final class AppModel {
         DispatchQueue.global(qos: .userInitiated).async {
             let ok = Self.emptyTrashSync()
             DispatchQueue.main.asyncAfter(deadline: .now() + 1) {
-                self.volume = .current()
+                self.refreshVolume()
                 self.refreshTrash()
                 let gained = self.volume.free - before
                 self.flash(ok ? "Trash emptied" + (gained > 0 ? ", \(fmt(gained)) freed" : "") : "Couldn't empty the Trash")
@@ -371,7 +539,7 @@ final class AppModel {
         cleanLoading = true
         refreshTrash()
         let cats = Cleaners.all
-        DispatchQueue.global(qos: .userInitiated).async {
+        DispatchQueue.global(qos: .utility).async {
             var res: [String: [SizedItem]] = [:]
             let lock = NSLock()
             DispatchQueue.concurrentPerform(iterations: cats.count) { i in
@@ -382,6 +550,7 @@ final class AppModel {
                     .sorted { $0.size > $1.size }
                 lock.lock(); res[c.id] = items; lock.unlock()
             }
+            CleanCache.save(res)
             DispatchQueue.main.async {
                 self.cleanResults = res
                 self.cleanLoading = false

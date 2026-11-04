@@ -12,10 +12,10 @@ struct AppsRoom: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            RoomHeader(room: .apps, subtitle: "What's installed, what starts with your Mac, and what's out of date") { EmptyView() }
-            summary
-                .padding(.horizontal, 32)
-                .padding(.bottom, 14)
+            RoomHeader(room: .apps, subtitle: subtitle) { EmptyView() }
+            TabStrip(selection: $tab, tabs: tabs)
+                .padding(.horizontal, 22)
+                .padding(.bottom, 10)
             switch tab {
             case .updates: updates
             case .startup: startup
@@ -28,28 +28,22 @@ struct AppsRoom: View {
         }
     }
 
-    /// Three tiles that are also the tabs: each says what's in it before you open it.
-    var summary: some View {
-        let total = model.apps.reduce(Int64(0)) { $0 + ($1.size ?? 0) }
-        let running = model.startup.filter { $0.enabled }
-        let atLogin = running.filter { $0.kind == .loginItem }.count
-        let updates = model.sparkleUpdates.count + model.brewOutdated.count
-        return HStack(spacing: 12) {
-            SummaryTile(symbol: "square.stack.3d.up", title: "Installed",
-                        value: model.appsLoading && model.apps.isEmpty ? "…" : "\(model.apps.count)", unit: "apps",
-                        note: model.sizingApps ? "Measuring…" : "\(fmt(total)) on disk",
-                        selected: tab == .all) { tab = .all }
-            SummaryTile(symbol: "power", title: "Startup",
-                        value: "\(running.count)", unit: "running",
-                        note: "\(atLogin) at login · \(running.count - atLogin) in the background",
-                        selected: tab == .startup) { tab = .startup }
-            SummaryTile(symbol: "arrow.down.circle", title: "Updates",
-                        value: model.lastUpdateCheck == nil ? "–" : "\(updates)", unit: model.lastUpdateCheck == nil ? "" : "waiting",
-                        note: model.checkingUpdates ? "Checking…" : model.lastUpdateCheck.map { "Checked \($0.formatted(.relative(presentation: .named)))" } ?? "Not checked yet",
-                        highlight: updates > 0,
-                        selected: tab == .updates) { tab = .updates }
+    var waiting: Int { model.sparkleUpdates.count + model.brewOutdated.count }
+
+    var tabs: [(value: Tab, title: String)] {
+        [(.all, "Installed"), (.startup, "Startup"), (.updates, waiting > 0 ? "Updates \(waiting)" : "Updates")]
+    }
+
+    var subtitle: String {
+        switch tab {
+        case .all:
+            let total = model.apps.reduce(Int64(0)) { $0 + ($1.size ?? 0) }
+            return model.sizingApps ? "\(model.apps.count) apps, measuring" : "\(model.apps.count) apps, \(fmt(total)) on disk"
+        case .startup:
+            return "\(model.startup.filter { $0.enabled }.count) things start with your Mac. Switching one off doesn't uninstall it"
+        case .updates:
+            return model.lastUpdateCheck.map { "Checked \($0.formatted(.relative(presentation: .named)))" } ?? "Not checked yet"
         }
-        .fixedSize(horizontal: false, vertical: true)
     }
 
     // Updates
@@ -58,14 +52,13 @@ struct AppsRoom: View {
         if model.lastUpdateCheck == nil && !model.checkingUpdates {
             let feeds = model.apps.filter { $0.feedURL != nil && !$0.isAppStore }.count
             VStack(spacing: 12) {
-                Image(systemName: "arrow.down.circle").font(.system(size: 30, weight: .light)).foregroundStyle(Theme.accent)
-                Text("Find newer versions").font(.system(size: 26, design: .serif))
+                Text("Find newer versions").font(.system(size: 13, weight: .medium))
                 Text("Roomy asks \(feeds > 0 ? "\(feeds) apps" : "each app") through their own update feeds\(Shell.brew == nil ? "" : ", plus Homebrew"). It's the only time Roomy goes online.")
                     .font(.callout).foregroundStyle(.secondary)
                     .multilineTextAlignment(.center)
                     .frame(maxWidth: 420)
                 Button("Check for Updates") { model.checkUpdates() }
-                    .buttonStyle(PillButtonStyle(color: Theme.accent, filled: true))
+                    .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
                     .padding(.top, 6)
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -81,7 +74,7 @@ struct AppsRoom: View {
                     }
                     Spacer()
                     Button("Check Again") { model.checkUpdates() }
-                        .buttonStyle(PillButtonStyle(color: .secondary))
+                        .buttonStyle(ActionButtonStyle(color: .secondary))
                         .disabled(model.checkingUpdates)
                 }
                 .padding(.vertical, 4)
@@ -103,7 +96,7 @@ struct AppsRoom: View {
                                 Button("Open to Update") {
                                     NSWorkspace.shared.openApplication(at: URL(fileURLWithPath: a.path), configuration: .init())
                                 }
-                                .buttonStyle(PillButtonStyle(color: Theme.accent))
+                                .buttonStyle(ActionButtonStyle(color: Theme.accent))
                                 .help("Opens the app. Most apps offer the update on launch, or under the app menu › Check for Updates")
                             }
                             .padding(.vertical, 3)
@@ -127,7 +120,7 @@ struct AppsRoom: View {
                                     ProgressView().controlSize(.small)
                                 } else {
                                     Button("In Terminal") { model.upgradeInTerminal(b) }.buttonStyle(.borderless).foregroundStyle(.secondary)
-                                    Button("Update") { model.upgrade(b) }.buttonStyle(PillButtonStyle(color: Theme.accent))
+                                    Button("Update") { model.upgrade(b) }.buttonStyle(ActionButtonStyle(color: Theme.accent))
                                 }
                             }
                             .padding(.vertical, 3)
@@ -153,8 +146,6 @@ struct AppsRoom: View {
     var startup: some View {
         List {
             HStack {
-                Text("Things that start with your Mac use memory and battery. Switching one off doesn't uninstall it.")
-                    .font(.caption).foregroundStyle(.secondary)
                 Spacer()
                 Button { model.loadStartup() } label: { Image(systemName: "arrow.clockwise") }
                     .buttonStyle(.borderless).help("Refresh")
@@ -175,7 +166,7 @@ struct AppsRoom: View {
                                 if model.busy.contains(item.id) {
                                     ProgressView().controlSize(.small)
                                 } else if kind == .loginItem {
-                                    Button("Remove") { model.setStartup(item, false) }.buttonStyle(PillButtonStyle(color: .secondary))
+                                    Button("Remove") { model.setStartup(item, false) }.buttonStyle(ActionButtonStyle(color: .secondary))
                                 } else {
                                     Toggle("", isOn: Binding(get: { item.enabled }, set: { model.setStartup(item, $0) }))
                                         .toggleStyle(.switch)
@@ -198,44 +189,41 @@ struct AppsRoom: View {
         let apps = sortBySize ? model.apps.sorted { ($0.size ?? 0) > ($1.size ?? 0) } : model.apps
         return VStack(spacing: 0) {
             HStack {
-                if model.sizingApps { ProgressView().controlSize(.small); Text("measuring…").font(.caption).foregroundStyle(.secondary) }
                 Spacer()
                 Toggle("Sort by size", isOn: $sortBySize).toggleStyle(.checkbox)
             }
-            .font(.callout)
-            .padding(.horizontal, 32)
-            .padding(.bottom, 6)
-            List(apps) { a in
-                HStack(spacing: 10) {
-                    FileIcon(path: a.path, size: 30)
-                    VStack(alignment: .leading, spacing: 1) {
-                        HStack {
-                            Text(a.name).font(.headline)
-                            if a.isAppStore { Text("App Store").font(.caption2).padding(.horizontal, 5).background(Theme.calm.opacity(0.15), in: Capsule()) }
+            .font(.system(size: 12.5))
+            .padding(.horizontal, 28)
+            .padding(.bottom, 4)
+            RowList {
+                ForEach(apps) { a in
+                    HoverRow(height: 42) {
+                        FileIcon(path: a.path, size: 26)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(a.name).font(.system(size: 13, weight: .medium)).lineLimit(1)
+                            Text(a.version.isEmpty ? a.bundleID : "Version \(a.version)\(a.isAppStore ? " · App Store" : "")")
+                                .font(.system(size: 12)).foregroundStyle(.secondary).lineLimit(1)
                         }
-                        Text(a.version.isEmpty ? a.bundleID : "Version \(a.version)").font(.caption).foregroundStyle(.secondary)
-                    }
-                    Spacer()
-                    Text(a.size.map(fmt) ?? "—").monospacedDigit().frame(width: 80, alignment: .trailing)
-                    let staged = model.isQueued(a.path)
-                    Button(staged ? "Added" : "Uninstall") {
-                        if staged {
-                            model.queue.removeAll { $0.source == "Uninstall" && ($0.path == a.path || $0.name.hasPrefix(a.name + ":")) }
-                        } else {
-                            model.stageUninstall(a)
+                        Spacer(minLength: 12)
+                        Text(a.size.map(fmt) ?? "–").font(.system(size: 13).monospacedDigit()).frame(width: 74, alignment: .trailing)
+                        let staged = model.isQueued(a.path)
+                        let apple = a.bundleID.hasPrefix("com.apple.")
+                        Button(staged ? "Added" : "Uninstall") {
+                            if staged {
+                                model.queue.removeAll { $0.source == "Uninstall" && ($0.path == a.path || $0.name.hasPrefix(a.name + ":")) }
+                            } else {
+                                model.stageUninstall(a)
+                            }
                         }
+                        .buttonStyle(ActionButtonStyle(color: staged ? Theme.good : .primary))
+                        .disabled(apple)
+                        .opacity(apple ? 0.35 : 1)
+                        .frame(width: 76, alignment: .trailing)
+                        .help("Adds the app plus its support files, caches and preferences to your clean list")
                     }
-                    .buttonStyle(PillButtonStyle(color: staged ? Theme.good : .secondary))
-                    .disabled(a.bundleID.hasPrefix("com.apple."))
-                    .opacity(a.bundleID.hasPrefix("com.apple.") ? 0.4 : 1)
-                    .help("Adds the app plus its support files, caches and preferences to your clean list")
+                    .contextMenu { Button("Reveal in Finder") { reveal(a.path) } }
                 }
-                .padding(.vertical, 2)
-                .contextMenu { Button("Reveal in Finder") { reveal(a.path) } }
             }
-            .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-            .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
         }
     }
 }
@@ -357,29 +345,22 @@ struct QueueBar: View {
 
     var body: some View {
         let bytes = model.queuedBytes
-        HStack(spacing: 14) {
-            Glyph(symbol: "tray.full", color: Theme.accent, size: 40)
-            VStack(alignment: .leading, spacing: 4) {
-                Text("Clean list: \(model.queue.count) item\(model.queue.count == 1 ? "" : "s") · \(fmt(bytes))").font(.headline)
-                HStack(spacing: 6) {
-                    Text("Free \(fmt(model.volume.free))")
-                    Image(systemName: "arrow.right").font(.caption2)
-                    Text(fmt(model.volume.free + bytes)).bold().foregroundStyle(Theme.good)
-                    Text("afterwards")
-                }
-                .font(.caption).foregroundStyle(.secondary)
-                DiskBar(total: model.volume.total, used: model.volume.used, staged: bytes, height: 6, count: 24).frame(width: 240)
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("\(model.queue.count) item\(model.queue.count == 1 ? "" : "s") · \(fmt(bytes))").font(.system(size: 13, weight: .medium))
+                Text("\(fmt(model.volume.free)) free now, \(fmt(model.volume.free + bytes)) afterwards")
+                    .font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary)
             }
             Spacer()
-            Button("Clear") { model.queue.removeAll() }
-            Button("Review & Clean") { model.showReview = true }
-                .buttonStyle(.borderedProminent)
+            Button("Clear") { model.queue.removeAll() }.buttonStyle(ActionButtonStyle(color: .secondary))
+            Button("Review and Clean") { model.showReview = true }
+                .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
                 .keyboardShortcut(.return, modifiers: .command)
         }
-        .padding(14)
-        .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.accent.opacity(0.5), lineWidth: 1))
-        .shadow(color: .black.opacity(0.10), radius: 18, y: 8)
+        .padding(.horizontal, 14)
+        .frame(height: 54)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 9, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 9, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
     }
 }
 
@@ -488,9 +469,6 @@ struct SettingsView: View {
                         openAtLogin = SMAppService.mainApp.status == .enabled
                     }
                 Toggle("Save a snapshot after every scan", isOn: $model.autoSnapshot)
-                if NotchController.notchScreen() != nil {
-                    Toggle("Show overview from the notch", isOn: $model.notchOverview)
-                }
             }
             Section {
                 LabeledContent("Lid-closed mode") {
@@ -511,41 +489,5 @@ struct SettingsView: View {
         .formStyle(.grouped)
         .frame(width: 460)
         .fixedSize(horizontal: false, vertical: true)
-    }
-}
-
-
-/// A tab that says what's behind it: a count, a unit and one line of detail.
-struct SummaryTile: View {
-    let symbol: String
-    let title: String
-    let value: String
-    var unit = ""
-    let note: String
-    var highlight = false
-    let selected: Bool
-    let action: () -> Void
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 0) {
-                Label(title, systemImage: symbol)
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(selected ? Theme.accent : .secondary)
-                BigValue(value: value, unit: unit, size: 30)
-                    .foregroundStyle(highlight ? Theme.accent : .primary)
-                    .padding(.top, 8)
-                Text(note).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                    .padding(.top, 2)
-            }
-            .padding(16)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(selected ? Theme.card : .clear, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
-                .strokeBorder(selected ? Color.clear : Theme.line, lineWidth: 1))
-            .contentShape(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-        }
-        .buttonStyle(.plain)
-        .animation(.easeOut(duration: 0.15), value: selected)
     }
 }

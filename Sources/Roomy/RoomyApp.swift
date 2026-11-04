@@ -14,7 +14,6 @@ struct RoomyApp: App {
                 .environment(monitor)
                 .environment(awake)
                 .task {
-                    NotchController.shared.install(model: model, monitor: monitor, awake: awake)
                     DebugSnapshot.scheduleIfAsked(model: model)
                 }
         }
@@ -48,6 +47,7 @@ struct ContentView: View {
         @Bindable var model = model
         HStack(spacing: 0) {
             sidebar
+            Rectangle().fill(Theme.line).frame(width: 1)
             ZStack(alignment: .bottom) {
                 Group {
                     switch model.room {
@@ -59,97 +59,131 @@ struct ContentView: View {
                     }
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
-                .background(Theme.canvas)
 
                 if !model.queue.isEmpty {
                     QueueBar()
                         .padding(.horizontal, 24)
-                        .padding(.bottom, 18)
+                        .padding(.bottom, 16)
                         .transition(.move(edge: .bottom).combined(with: .opacity))
                 }
             }
+            .background(Theme.canvas)
             .overlay(alignment: .top) {
                 if let t = model.toast {
                     HStack(spacing: 12) {
-                        Text(t.text)
+                        Text(t.text).font(.system(size: 12.5))
                         if t.canUndo {
                             Button("Undo") { model.undoTrash() }
-                                .buttonStyle(.borderedProminent)
-                                .controlSize(.small)
+                                .buttonStyle(ActionButtonStyle(color: Theme.accent))
                                 .keyboardShortcut("z", modifiers: .command)
                         }
                     }
-                    .padding(.horizontal, 16).padding(.vertical, 10)
-                    .background(Theme.card, in: Capsule())
-                    .overlay(Capsule().strokeBorder(Theme.line, lineWidth: 1))
-                    .shadow(color: .black.opacity(0.10), radius: 12, y: 4)
+                    .padding(.horizontal, 14)
+                    .frame(minHeight: 38)
+                    .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                    .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line, lineWidth: 1))
                     .padding(.top, 12)
-                    .transition(.move(edge: .top).combined(with: .opacity))
+                    .transition(.opacity)
                 }
             }
-            .animation(.snappy, value: model.queue.isEmpty)
-            .animation(.snappy, value: model.toast)
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-            .padding([.top, .bottom, .trailing], 10)
+            .animation(.easeOut(duration: 0.15), value: model.queue.isEmpty)
+            .animation(.easeOut(duration: 0.15), value: model.toast)
         }
         .background(Theme.chrome)
         .ignoresSafeArea()
         .background(WindowTweaks())
+        .background(shortcuts)
         .tint(Theme.accent)
         .sheet(isPresented: $model.showReview) { ReviewSheet().environment(model).tint(Theme.accent) }
-        .frame(minWidth: 900, minHeight: 600)
+        .overlay {
+            if model.showSearch {
+                ZStack(alignment: .top) {
+                    // Clicking anywhere outside closes search.
+                    Color.black.opacity(0.25)
+                        .contentShape(Rectangle())
+                        .onTapGesture { model.showSearch = false }
+                    SearchPalette().padding(.top, 72)
+                }
+                .ignoresSafeArea()
+            }
+        }
+        .frame(minWidth: 860, minHeight: 560)
         .onAppear {
             model.applyAppearance()
             model.refreshTrash()
             model.autoStart()
         }
         .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
-            model.refreshTrash()
-            model.volume = .current()
+            model.refreshTrash(force: false)
+            model.refreshVolume()
         }
     }
 
-    /// One flat list of rooms, the free space as one quiet line at the bottom.
+    /// ⌘K to search, ⌘1 to ⌘5 for pages, ⌘R to scan again.
+    var shortcuts: some View {
+        ZStack {
+            Button("") { model.showSearch = true }.keyboardShortcut("k", modifiers: .command)
+            Button("") { model.startScan() }.keyboardShortcut("r", modifiers: .command)
+            ForEach(Array(Room.allCases.enumerated()), id: \.element) { i, r in
+                Button("") { model.room = r }.keyboardShortcut(KeyEquivalent(Character("\(i + 1)")), modifiers: .command)
+            }
+        }
+        .opacity(0)
+        .allowsHitTesting(false)
+    }
+
+    /// One flat list of rooms, free space as one quiet line at the bottom.
     var sidebar: some View {
-        VStack(alignment: .leading, spacing: 2) {
+        VStack(alignment: .leading, spacing: 1) {
+            Button { model.showSearch = true } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "magnifyingglass").font(.system(size: 11)).frame(width: 18)
+                    Text("Search")
+                    Spacer()
+                    Text("⌘K").font(.system(size: 11)).foregroundStyle(.tertiary)
+                }
+                .font(.system(size: 13))
+                .foregroundStyle(.secondary)
+                .padding(.horizontal, 8)
+                .frame(height: 28)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .padding(.bottom, 8)
             ForEach(Room.allCases) { item($0) }
             Spacer()
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(alignment: .firstTextBaseline, spacing: 4) {
-                    Text(sizeParts(model.volume.free).0).font(.system(size: 18, design: .serif)).monospacedDigit()
-                    Text("\(sizeParts(model.volume.free).1) free").font(.caption.weight(.medium)).foregroundStyle(.secondary)
-                }
+            Text("\(fmt(model.volume.free)) free")
+                .font(.system(size: 12).monospacedDigit())
+                .foregroundStyle(.secondary)
                 .lineLimit(1)
-                DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 6, count: 16)
-            }
-            .padding(.horizontal, 10)
-            .padding(.bottom, 16)
+                .padding(.horizontal, 8)
+                .padding(.bottom, 14)
         }
-        .padding(.top, 52)
-        .padding(.horizontal, 10)
-        .frame(width: 210)
+        .padding(.top, 44)
+        .padding(.horizontal, 8)
+        .frame(width: 196)
     }
 
     func item(_ r: Room) -> some View {
         let selected = model.room == r
         return Button { model.room = r } label: {
-            HStack(spacing: 10) {
+            HStack(spacing: 8) {
                 Image(systemName: r == .awake && awake.isOn ? "cup.and.heat.waves.fill" : r.icon)
-                    .font(.system(size: 13, weight: .medium))
+                    .font(.system(size: 12.5))
                     .foregroundStyle(selected ? Theme.accent : .secondary)
                     .frame(width: 18)
                 Text(r.title)
-                    .font(.system(size: 13, weight: selected ? .semibold : .regular))
+                    .font(.system(size: 13, weight: selected ? .medium : .regular))
                     .foregroundStyle(.primary)
                 Spacer(minLength: 4)
                 if let b = badge(for: r) {
-                    Text(b).font(.caption.monospacedDigit()).foregroundStyle(.secondary)
+                    Text(b).font(.system(size: 11.5).monospacedDigit()).foregroundStyle(.secondary)
                 }
             }
             .lineLimit(1)
-            .padding(.horizontal, 10)
-            .frame(height: 32)
-            .background(selected ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+            .padding(.horizontal, 8)
+            .frame(height: 28)
+            .background(selected ? Color.primary.opacity(0.07) : .clear, in: RoundedRectangle(cornerRadius: 6, style: .continuous))
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
@@ -198,12 +232,12 @@ struct MonitorView: View {
 
             VStack(alignment: .leading, spacing: 6) {
                 HStack(alignment: .firstTextBaseline) {
-                    Text(fmt(model.volume.free)).font(.system(size: 22, design: .serif)).monospacedDigit()
+                    Text(fmt(model.volume.free)).font(.system(size: 22, weight: .semibold)).monospacedDigit()
                     Text("free").foregroundStyle(.secondary)
                     Spacer()
                     Text("of \(fmt(model.volume.total))").font(.caption).foregroundStyle(.secondary)
                 }
-                DiskBar(total: model.volume.total, used: model.volume.used, height: 8, count: 24)
+                DiskBar(total: model.volume.total, used: model.volume.used, height: 6)
             }
 
             HStack(spacing: 0) {
@@ -257,7 +291,7 @@ struct MonitorView: View {
         .padding(16)
         .frame(width: 320)
         .tint(Theme.accent)
-        .onAppear { mon.start(); model.volume = .current() }
+        .onAppear { mon.start(); model.refreshVolume() }
         .onDisappear { mon.stop() }
     }
 

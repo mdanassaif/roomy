@@ -1,27 +1,22 @@
 import SwiftUI
 import AppKit
 
-/// Roomy's look: warm paper, hairline-edged cards, serif numbers, one coral accent,
-/// and space drawn as rows of little blocks, like rooms in a floor plan.
+/// Roomy's look: neutral surfaces, hairlines, plain rows, one accent. Colour is for status only.
 /// Every colour has a light and a dark value, so both modes are first-class.
 enum Theme {
-    /// The window frame behind the sidebar and around the page panel.
-    static let chrome = dynamic(light: (0.905, 0.892, 0.866), dark: (0.058, 0.056, 0.052))
-    /// The page itself: one sheet of paper, inset from the frame.
-    static let canvas = dynamic(light: (0.995, 0.991, 0.980), dark: (0.112, 0.107, 0.098))
-    /// Cards sit on the page as a soft fill, no outline.
-    static let card = dynamic(light: (0.958, 0.946, 0.922), dark: (0.150, 0.144, 0.133))
-    static let line = dynamic(light: (0.885, 0.866, 0.828), dark: (0.210, 0.201, 0.185))
-    static let empty = dynamic(light: (0.915, 0.900, 0.870), dark: (0.200, 0.191, 0.175))
+    static let chrome = dynamic(light: (0.962, 0.962, 0.958), dark: (0.086, 0.086, 0.094))
+    static let canvas = dynamic(light: (1.000, 1.000, 1.000), dark: (0.110, 0.110, 0.118))
+    static let card = dynamic(light: (0.970, 0.970, 0.966), dark: (0.145, 0.145, 0.155))
+    static let line = dynamic(light: (0.898, 0.898, 0.890), dark: (0.200, 0.200, 0.212))
+    static let empty = dynamic(light: (0.925, 0.925, 0.918), dark: (0.190, 0.190, 0.202))
 
-    static let accent = dynamic(light: (0.855, 0.330, 0.200), dark: (0.980, 0.510, 0.365))
-    static let accentSoft = dynamic(light: (0.985, 0.915, 0.885), dark: (0.255, 0.140, 0.105))
-    static let warm = dynamic(light: (0.835, 0.560, 0.090), dark: (0.960, 0.720, 0.300))
+    static let accent = dynamic(light: (0.310, 0.340, 0.830), dark: (0.545, 0.580, 0.980))
+    static let warm = dynamic(light: (0.760, 0.490, 0.060), dark: (0.930, 0.690, 0.280))
     static let warn = dynamic(light: (0.780, 0.180, 0.200), dark: (1.000, 0.430, 0.420))
-    static let good = dynamic(light: (0.200, 0.530, 0.380), dark: (0.430, 0.800, 0.600))
+    static let good = dynamic(light: (0.160, 0.520, 0.360), dark: (0.400, 0.790, 0.590))
     static let calm = dynamic(light: (0.240, 0.380, 0.600), dark: (0.560, 0.690, 0.930))
 
-    static let radius: CGFloat = 14
+    static let radius: CGFloat = 7
 
     static func dynamic(light: (Double, Double, Double), dark: (Double, Double, Double)) -> Color {
         Color(nsColor: NSColor(name: nil) { appearance in
@@ -31,104 +26,46 @@ enum Theme {
     }
 }
 
-extension View {
-    /// A soft filled card on the page. No outline, no shadow.
-    func tile(padding: CGFloat = 20) -> some View {
-        self.padding(padding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background(Theme.card, in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-    }
-
-    /// A card washed with a colour, for things that are "on" right now (Keep Awake, charging).
-    func washTile(padding: CGFloat = 20, color: Color?) -> some View {
-        self.padding(padding)
-            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
-            .background {
-                RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
-                    .fill(Theme.card)
-                    .overlay {
-                        if let color {
-                            RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).fill(color.opacity(0.12))
-                        }
-                    }
-            }
-            .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous)
-                .strokeBorder(color.map { $0.opacity(0.35) } ?? Color.clear, lineWidth: 1))
-    }
-}
-
-/// A small sans label set above or beside a value: "Macintosh HD", "of 8 GB".
+/// A small label above a group of rows.
 struct Eyebrow: View {
     let text: String
     init(_ text: String) { self.text = text }
     var body: some View {
         Text(text)
-            .font(.system(size: 11.5, weight: .semibold))
+            .font(.system(size: 12, weight: .medium))
             .foregroundStyle(.secondary)
             .lineLimit(1)
     }
 }
 
-/// A symbol on a softly tinted square.
-struct Glyph: View {
-    let symbol: String
-    let color: Color
-    var size: CGFloat = 34
-    var body: some View {
-        Image(systemName: symbol)
-            .font(.system(size: size * 0.44, weight: .medium))
-            .foregroundStyle(color)
-            .frame(width: size, height: size)
-            .background(color.opacity(0.13), in: RoundedRectangle(cornerRadius: size * 0.3, style: .continuous))
-    }
-}
-
-/// "Open ›": a quiet text link in a card's corner.
-struct OpenLink: View {
-    var title = "Open"
-    let action: () -> Void
-    var body: some View {
-        Button(action: action) {
-            HStack(spacing: 3) {
-                Text(title)
-                Image(systemName: "chevron.right").font(.system(size: 9, weight: .bold))
-            }
-            .font(.callout.weight(.medium))
-            .foregroundStyle(Theme.accent)
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-}
-
-/// A capsule button: solid when it's the thing to do now, outlined otherwise.
-struct PillButtonStyle: ButtonStyle {
-    var color: Color = Theme.accent
+/// A small flat button: solid for the one thing to do now, a quiet fill otherwise.
+struct ActionButtonStyle: ButtonStyle {
+    var color: Color = .primary
     var filled = false
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
-            .font(.callout.weight(.semibold))
+            .font(.system(size: 12, weight: .medium))
             .lineLimit(1)
-            .padding(.horizontal, 14)
-            .padding(.vertical, 6)
+            .padding(.horizontal, 10)
+            .frame(height: 26)
             .foregroundStyle(filled ? Color.white : color)
-            .background(filled ? AnyShapeStyle(color) : AnyShapeStyle(Color.clear), in: Capsule())
-            .overlay(Capsule().strokeBorder(filled ? Color.clear : color.opacity(0.45), lineWidth: 1))
-            .contentShape(Capsule())
+            .background(filled ? AnyShapeStyle(color) : AnyShapeStyle(Color.primary.opacity(0.06)),
+                        in: RoundedRectangle(cornerRadius: 6, style: .continuous))
+            .contentShape(Rectangle())
             .opacity(configuration.isPressed ? 0.7 : 1)
     }
 }
 
-/// A big serif number with its unit set small beside it: "69.5" "GB".
+/// A number with its unit set small beside it: "69.5" "GB".
 struct BigValue: View {
     let value: String
     var unit: String = ""
     var size: CGFloat = 30
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 5) {
-            Text(value).font(.system(size: size, weight: .regular, design: .serif)).monospacedDigit()
+            Text(value).font(.system(size: size, weight: .semibold)).monospacedDigit().tracking(-size * 0.02)
             if !unit.isEmpty {
-                Text(unit).font(.system(size: max(12, size * 0.36), weight: .medium)).foregroundStyle(.secondary)
+                Text(unit).font(.system(size: max(12, size * 0.4))).foregroundStyle(.secondary)
             }
         }
         .lineLimit(1)
@@ -149,43 +86,25 @@ func sizeParts(_ bytes: Int64) -> (String, String) {
     return (parts[0], unit)
 }
 
-/// Roomy's signature bar: a row of blocks, each one a slice of the whole.
-/// `parts` fill from the left in order; whatever's left stays empty.
-struct BlockBar: View {
+/// One thin bar. `parts` fill from the left in order; whatever's left stays empty.
+struct StackBar: View {
     var parts: [(fraction: Double, color: Color)]
-    var count = 24
-    var height: CGFloat = 8
-    var gap: CGFloat = 2
+    var height: CGFloat = 6
+    var gap: CGFloat = 0
 
     var body: some View {
-        HStack(spacing: gap) {
-            ForEach(0..<count, id: \.self) { i in
-                RoundedRectangle(cornerRadius: min(3, height / 3), style: .continuous)
-                    .fill(color(at: i))
+        Canvas { ctx, size in
+            let shape = Path(roundedRect: CGRect(origin: .zero, size: size), cornerRadius: size.height / 2)
+            ctx.fill(shape, with: .color(Theme.empty))
+            ctx.clip(to: shape)
+            var x: CGFloat = 0
+            for p in parts {
+                let w = size.width * CGFloat(min(1, max(0, p.fraction)))
+                guard w > 0 else { continue }
+                ctx.fill(Path(CGRect(x: x, y: 0, width: max(1, w - gap), height: size.height)), with: .color(p.color))
+                x += w
             }
         }
         .frame(height: height)
-    }
-
-    func color(at i: Int) -> Color {
-        let mid = (Double(i) + 0.5) / Double(count)
-        var edge = 0.0
-        for p in parts {
-            edge += max(0, p.fraction)
-            if mid < edge { return p.color }
-        }
-        return Theme.empty
-    }
-}
-
-/// A single-value block bar.
-struct Meter: View {
-    let fraction: Double
-    var color: Color = Theme.accent
-    var height: CGFloat = 6
-    var count = 20
-    var body: some View {
-        BlockBar(parts: [(min(1, max(0, fraction)), color)], count: count, height: height)
-            .animation(.snappy, value: fraction)
     }
 }

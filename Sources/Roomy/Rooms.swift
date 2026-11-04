@@ -3,190 +3,174 @@ import AppKit
 
 // MARK: - Home
 
+/// A to-do list for the disk: how much room is left, where it went, what's worth doing about it.
 struct HomeRoom: View {
     @Environment(AppModel.self) private var model
     @State private var confirmEmpty = false
 
     var freeFraction: Double { Double(model.volume.free) / Double(max(model.volume.total, 1)) }
     var low: Bool { freeFraction < 0.10 }
+    var ready: Int64 { model.smartBytes + (model.trashSize ?? 0) }
+
+    var subtitle: String {
+        if ready > 0 { return "\(fmt(ready)) can go right now without you missing a thing" }
+        if model.cleanLoading { return "Looking for things you can safely remove" }
+        return "Nothing needs cleaning right now"
+    }
 
     var body: some View {
-        let _ = model.treeVersion
-        Page {
+        let list = model.suggestions
+        ScrollView {
             VStack(alignment: .leading, spacing: 0) {
-                masthead.padding(.bottom, 24)
-                plan
-                grewLately.padding(.top, 18)
-                if !model.hasFullDiskAccess { FullDiskAccessCard().padding(.top, 20) }
+                RoomHeader(room: .home, subtitle: subtitle) { ScanControl() }
+                VStack(alignment: .leading, spacing: 26) {
+                    space.padding(.horizontal, 10)
+                    if !model.hasFullDiskAccess { FullDiskAccessRow() }
+                    todo(list)
+                    if let g = model.growth, !g.rows.isEmpty { grew(g) }
+                }
+                .padding(.horizontal, 18)
+                .padding(.top, 6)
+                .padding(.bottom, 90)
             }
-            .padding(.horizontal, 36)
-            .padding(.top, 30)
-            .padding(.bottom, 120)
         }
         .confirmationDialog("Empty the Trash?", isPresented: $confirmEmpty) {
             Button("Empty Trash", role: .destructive) { model.emptyTrash() }
         } message: {
             Text("Everything in the Trash will be permanently deleted. This can't be undone.")
         }
-        .onAppear { model.refreshTrash(); model.volume = .current() }
     }
 
-    // MARK: Top
+    // MARK: Space
 
-    var masthead: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
-                Circle().fill(low ? Theme.warn : Theme.accent).frame(width: 7, height: 7)
-                Text("\(Self.greeting()) · \(Date().formatted(.dateTime.weekday(.wide).day().month(.wide)))")
-                    .font(.callout.weight(.medium)).foregroundStyle(.secondary)
-            }
-            Text(headlineText)
-                .font(.system(size: 40, weight: .regular, design: .serif))
-                .tracking(-0.6)
-            Text(subheadText).font(.title3).foregroundStyle(.secondary)
-        }
-    }
-
-    static func greeting() -> String {
-        switch Calendar.current.component(.hour, from: Date()) {
-        case 5..<12: "Good morning"
-        case 12..<17: "Good afternoon"
-        case 17..<22: "Good evening"
-        default: "Hello, night owl"
-        }
-    }
-
-    var headlineText: String {
-        if freeFraction < 0.05 { return "This Mac has almost run out of room" }
-        if low { return "Space is getting tight" }
-        if freeFraction < 0.25 { return "This Mac is in good shape" }
-        return "This Mac has plenty of room"
-    }
-
-    var subheadText: String {
-        let bytes = model.smartBytes
-        if model.cleanLoading && bytes == 0 { return "Looking for things you can safely remove…" }
-        if bytes > 0 { return "\(fmt(bytes)) of leftovers can go without you missing a thing." }
-        return "Nothing obvious to clean right now."
-    }
-
-    // MARK: The plan
-
-    /// Free space, where it's heading, and the home folder as a floor plan. One card, one main action.
-    var plan: some View {
+    var space: some View {
         let free = sizeParts(model.volume.free)
         let f = model.forecast
-        return VStack(alignment: .leading, spacing: 0) {
+        let segments = folders
+        let total = Double(max(model.volume.total, 1))
+        return VStack(alignment: .leading, spacing: 12) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                BigValue(value: free.0, unit: "\(free.1) free", size: 56)
-                Text("of \(fmt(model.volume.total))").font(.callout).foregroundStyle(.secondary)
+                BigValue(value: free.0, unit: free.1, size: 34)
+                    .foregroundStyle(low ? Theme.warn : .primary)
+                Text("free of \(fmt(model.volume.total))").font(.system(size: 13)).foregroundStyle(.secondary)
                 Spacer()
-                Label(f.text, systemImage: f.urgent ? "exclamationmark.triangle" : f.ready ? "chart.line.downtrend.xyaxis" : "clock")
-                    .font(.callout.weight(.medium))
-                    .foregroundStyle(f.urgent ? Theme.warn : .secondary)
-                    .lineLimit(1)
-                    .help("Roomy notes free space a few times a day and draws a line through the last three weeks.")
+                if f.ready {
+                    Text(f.text)
+                        .font(.system(size: 12))
+                        .foregroundStyle(f.urgent ? Theme.warn : .secondary)
+                        .help("Roomy notes free space a few times a day and draws a line through the last three weeks.")
+                }
             }
-            DiskBar(total: model.volume.total, used: model.volume.used, staged: model.queuedBytes, height: 8, count: 48)
-                .padding(.top, 12)
-
-            HStack {
-                Eyebrow(model.root.map { "Inside \($0.name)" } ?? "Your files")
-                Spacer()
-                if model.scanning {
-                    Button("Cancel") { model.cancelScan() }.buttonStyle(.borderless).foregroundStyle(.secondary)
-                } else {
-                    Menu("Scan") {
-                        Button("My Files") { model.startScan(NSHomeDirectory()) }
-                        Button("Whole Mac") { model.startScan("/") }
-                        Button("A Folder…") { pickFolder() }
+            StackBar(parts: segments.map { (Double($0.bytes) / total, $0.color) }, height: 8, gap: 2)
+            HStack(spacing: 16) {
+                ForEach(segments) { s in
+                    Button {
+                        if let n = s.node { model.open(n) }
+                    } label: {
+                        HStack(spacing: 6) {
+                            Circle().fill(s.color).frame(width: 7, height: 7)
+                            Text(s.name).foregroundStyle(.primary)
+                            Text(fmt(s.bytes)).monospacedDigit().foregroundStyle(.secondary)
+                        }
+                        .lineLimit(1)
+                        .contentShape(Rectangle())
                     }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-                    .foregroundStyle(.secondary)
+                    .buttonStyle(.plain)
+                    .disabled(s.node == nil)
                 }
+                Spacer(minLength: 0)
             }
-            .padding(.top, 24)
-            .padding(.bottom, 8)
-
-            Group {
-                if let root = model.root, !model.scanning {
-                    FloorPlan(node: root) { model.open($0) }
-                } else {
-                    VStack(spacing: 10) {
-                        ProgressView().controlSize(.small)
-                        Text(model.scanning ? "Measuring \(model.scanFiles.formatted()) files · \(fmt(model.scanBytes))" : "Scan to draw your floor plan")
-                            .font(.callout.monospacedDigit()).foregroundStyle(.secondary)
-                    }
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(RoundedRectangle(cornerRadius: 2).strokeBorder(Color.primary.opacity(0.25), style: StrokeStyle(lineWidth: 1.5, dash: [5, 4])))
-                }
-            }
-            .frame(height: 330)
-
-            HStack(spacing: 10) {
-                Button(model.smartBytes > 0 ? "Free up \(fmt(model.smartBytes))" : model.cleanLoading ? "Looking…" : "Nothing to clean") {
-                    model.stageSmart()
-                }
-                .buttonStyle(PillButtonStyle(color: Theme.accent, filled: true))
-                .disabled(model.smartBytes == 0)
-                .opacity(model.smartBytes == 0 ? 0.5 : 1)
-                if let t = model.trashSize, t > 0 {
-                    Button("Empty Trash · \(fmt(t))") { confirmEmpty = true }
-                        .buttonStyle(PillButtonStyle(color: .secondary))
-                }
-                Spacer()
-                Text("Click a room to walk in. Right-click to add it to your clean list.")
-                    .font(.caption).foregroundStyle(.tertiary).lineLimit(1)
-            }
-            .padding(.top, 18)
+            .font(.system(size: 12))
         }
-        .tile(padding: 24)
+    }
+
+    struct Segment: Identifiable {
+        var id: String { name }
+        let name: String
+        let bytes: Int64
+        let color: Color
+        var node: FileNode?
+    }
+
+    /// The three biggest folders in shades of the accent, then everything else on the disk.
+    var folders: [Segment] {
+        let used = model.volume.used
+        guard let root = model.root else { return [Segment(name: "Used", bytes: used, color: Theme.accent)] }
+        let top = root.children.filter { $0.isDir }.prefix(3)
+        let shades: [Double] = [1, 0.62, 0.36]
+        var out = top.enumerated().map { i, n in
+            Segment(name: n.name, bytes: n.size, color: Theme.accent.opacity(shades[i]), node: n)
+        }
+        let rest = used - top.reduce(0) { $0 + $1.size }
+        if rest > 0 { out.append(Segment(name: "Everything else", bytes: rest, color: Color.primary.opacity(0.2))) }
+        return out
+    }
+
+    // MARK: To do
+
+    @ViewBuilder
+    func todo(_ list: [Suggestion]) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Eyebrow("Worth doing")
+                Spacer()
+                if model.smartBytes > 0 {
+                    Button("Free up \(fmt(model.smartBytes))") { model.stageSmart() }
+                        .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(minHeight: 28)
+
+            if list.isEmpty {
+                Text(model.cleanLoading ? "Checking your Mac…" : "All clear. Nothing to do.")
+                    .font(.system(size: 13)).foregroundStyle(.secondary)
+                    .padding(.horizontal, 10).padding(.vertical, 10)
+            }
+            ForEach(list.prefix(7)) { s in
+                HoverRow(height: 46) {
+                    Image(systemName: s.icon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(s.title).font(.system(size: 13, weight: .medium))
+                        Text(s.detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    .lineLimit(1)
+                    Spacer(minLength: 12)
+                    Text(fmt(s.bytes)).font(.system(size: 13).monospacedDigit())
+                    Button(s.button) {
+                        if case .emptyTrash = s.action { confirmEmpty = true } else { model.run(s.action) }
+                    }
+                    .buttonStyle(ActionButtonStyle())
+                    .frame(width: 66, alignment: .trailing)
+                }
+            }
+        }
     }
 
     // MARK: What grew
 
-    @ViewBuilder
-    var grewLately: some View {
-        let g = model.root.flatMap { model.snapshots.grewLately(root: $0.path) }
-        HStack(spacing: 8) {
-            Image(systemName: "arrow.up.right").font(.caption.weight(.bold)).foregroundStyle(Theme.accent)
-            if let g, !g.rows.isEmpty {
-                Text("Grew since \(g.since.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
-                    .font(.callout.weight(.semibold))
-                ForEach(g.rows) { r in
-                    Button {
-                        if let n = model.root?.find(r.path) { model.open(n) } else { reveal(r.path) }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Text(r.name).foregroundStyle(.primary)
-                            Text("+\(fmt(r.delta))").monospacedDigit().foregroundStyle(Theme.accent)
-                        }
-                        .font(.callout)
-                        .lineLimit(1)
+    func grew(_ g: (since: Date, rows: [Growth])) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Eyebrow("Grew since \(g.since.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
+                .padding(.horizontal, 10)
+                .frame(minHeight: 28)
+            ForEach(g.rows) { r in
+                Button {
+                    if let n = model.root?.find(r.path) { model.open(n) } else { reveal(r.path) }
+                } label: {
+                    HoverRow(height: 34) {
+                        Image(systemName: "arrow.up.right").font(.system(size: 11)).foregroundStyle(.secondary).frame(width: 20)
+                        Text(r.name).font(.system(size: 13)).lineLimit(1)
+                        Spacer()
+                        Text("+\(fmt(r.delta))").font(.system(size: 13).monospacedDigit()).foregroundStyle(Theme.warm)
                     }
-                    .buttonStyle(.plain)
-                    .help(r.path)
                 }
-            } else if g != nil {
-                Text("Nothing grew much since your last scan a while ago.").font(.callout).foregroundStyle(.secondary)
-            } else {
-                Text("Scan again in a day or two and Roomy will show what grew.").font(.callout).foregroundStyle(.secondary)
+                .buttonStyle(.plain)
+                .help(r.path)
             }
-            Spacer()
         }
-        .padding(.horizontal, 4)
-    }
-
-    func pickFolder() {
-        let p = NSOpenPanel()
-        p.canChooseDirectories = true
-        p.canChooseFiles = false
-        p.prompt = "Scan"
-        if p.runModal() == .OK, let u = p.url { model.startScan(u.path) }
     }
 }
-
 
 // MARK: - Storage
 
@@ -195,23 +179,16 @@ struct StorageRoom: View {
 
     var body: some View {
         @Bindable var model = model
-        VStack(spacing: 0) {
-            RoomHeader(room: .storage, subtitle: subtitle) {
-                Picker("", selection: $model.storageTab) {
-                    ForEach(StorageTab.allCases, id: \.self) { Text($0.rawValue) }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .fixedSize()
-                if model.root != nil {
-                    Button { model.startScan() } label: { Image(systemName: "arrow.clockwise") }
-                        .help("Scan again")
-                        .disabled(model.scanning)
-                }
-            }
+        VStack(alignment: .leading, spacing: 0) {
+            RoomHeader(room: .storage, subtitle: subtitle) { ScanControl() }
+            TabStrip(selection: $model.storageTab, tabs: StorageTab.allCases.map { ($0, $0.rawValue) })
+                .padding(.horizontal, 22)
+                .padding(.bottom, 10)
             switch model.storageTab {
             case .folders: FoldersView()
             case .large: LargeFilesView()
+            case .types: TypesView()
+            case .duplicates: DuplicatesView()
             case .changes: ChangesView()
             }
         }
@@ -219,9 +196,11 @@ struct StorageRoom: View {
 
     var subtitle: String {
         switch model.storageTab {
-        case .folders: "Click a folder to look inside. Add what you don't need; nothing is deleted until you review"
+        case .folders: "Add what you don't need. Nothing is deleted until you review it"
         case .large: "The biggest single files from your last scan"
-        case .changes: "Every scan is saved. Compare two and see what grew"
+        case .types: "What kinds of files are taking up the room"
+        case .duplicates: "Identical copies, compared by their contents"
+        case .changes: "Compare two scans and see what grew"
         }
     }
 }
@@ -234,18 +213,10 @@ struct FoldersView: View {
         if let node = model.current ?? model.root {
             VStack(spacing: 0) {
                 breadcrumb(node)
-                FloorPlan(node: node, maxRooms: 16) { model.current = $0 }
-                    .frame(height: 240)
-                    .padding(.horizontal, 32)
-                    .padding(.vertical, 10)
-                List {
-                    ForEach(node.children.prefix(300)) { c in
-                        row(c, parent: node)
-                    }
-                    Color.clear.frame(height: 80).listRowSeparator(.hidden)
+                RowList {
+                    ForEach(node.children.prefix(300)) { row($0, parent: node) }
                 }
-                .listStyle(.inset)
-                .scrollContentBackground(.hidden)
+                .id(node.path)
             }
         } else {
             EmptyScanPrompt()
@@ -253,58 +224,57 @@ struct FoldersView: View {
     }
 
     func breadcrumb(_ node: FileNode) -> some View {
-        ScrollView(.horizontal, showsIndicators: false) {
-            HStack(spacing: 4) {
-                if node.parent != nil {
-                    Button { model.current = node.parent } label: { Image(systemName: "chevron.backward") }
-                        .buttonStyle(.borderless)
-                        .keyboardShortcut("[", modifiers: .command)
+        HStack(spacing: 5) {
+            ScrollView(.horizontal, showsIndicators: false) {
+                HStack(spacing: 5) {
+                    ForEach(node.chain) { n in
+                        Button(n.name) { model.current = n }
+                            .buttonStyle(.plain)
+                            .foregroundStyle(n === node ? Color.primary : Color.secondary)
+                            .fontWeight(n === node ? .medium : .regular)
+                        if n !== node { Image(systemName: "chevron.right").font(.system(size: 9)).foregroundStyle(.tertiary) }
+                    }
                 }
-                ForEach(node.chain) { n in
-                    Button(n.name) { model.current = n }
-                        .buttonStyle(.plain)
-                        .foregroundStyle(n === node ? Color.primary : Color.secondary)
-                        .fontWeight(n === node ? .semibold : .regular)
-                    if n !== node { Image(systemName: "chevron.right").font(.caption2).foregroundStyle(.tertiary) }
-                }
-                Spacer()
-                Text("\(fmt(node.size)) · \(node.items.formatted()) files").foregroundStyle(.secondary).font(.callout)
             }
-            .padding(.horizontal, 32)
+            Spacer(minLength: 12)
+            Text("\(fmt(node.size)) · \(node.items.formatted()) files").foregroundStyle(.secondary).monospacedDigit().lineLimit(1)
+            if node.parent != nil {
+                Button { model.current = node.parent } label: { Image(systemName: "arrow.up") }
+                    .buttonStyle(.borderless)
+                    .keyboardShortcut("[", modifiers: .command)
+                    .help("Up one level")
+            }
         }
+        .font(.system(size: 12.5))
+        .padding(.horizontal, 28)
+        .padding(.bottom, 8)
     }
 
     func row(_ c: FileNode, parent: FileNode) -> some View {
-        HStack(spacing: 10) {
+        let advice = Advisor.explain(c.path, name: c.name)
+        return HoverRow(height: 40) {
             Button {
                 if c.isDir { model.current = c }
             } label: {
                 HStack(spacing: 10) {
-                    FileIcon(path: c.path, aggregate: c.isAggregate, size: 22)
+                    FileIcon(path: c.path, aggregate: c.isAggregate, size: 20)
                     VStack(alignment: .leading, spacing: 1) {
-                        HStack(spacing: 6) {
-                            Text(c.name).lineLimit(1).truncationMode(.middle)
-                            if let a = Advisor.explain(c.path, name: c.name) { AdviceBadge(advice: a) }
-                        }
-                        if let a = Advisor.explain(c.path, name: c.name) {
-                            Text(a.text).font(.caption).foregroundStyle(.secondary).lineLimit(1)
-                        } else if c.isDir {
-                            Text("\(c.items.formatted()) files").font(.caption).foregroundStyle(.secondary)
+                        Text(c.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                        if let advice {
+                            Text(advice.text).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
                         }
                     }
-                    Spacer()
+                    Spacer(minLength: 12)
                     SizeBar(fraction: Double(c.size) / Double(max(parent.size, 1)))
-                    Text(fmt(c.size)).monospacedDigit().frame(width: 80, alignment: .trailing)
-                    Image(systemName: "chevron.right").font(.caption).foregroundStyle(c.isDir ? Color.secondary : Color.clear)
+                    Text(fmt(c.size)).font(.system(size: 13).monospacedDigit()).frame(width: 74, alignment: .trailing)
                 }
                 .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            if c.isAggregate { Color.clear.frame(width: 70) } else {
+            if c.isAggregate { Color.clear.frame(width: 62, height: 1) } else {
                 StageButton(path: c.path, name: c.name, size: c.size, source: "Storage")
             }
         }
-        .padding(.vertical, 2)
         .contextMenu {
             if !c.isAggregate {
                 Button("Add to Clean List") { model.stage(c) }
@@ -314,82 +284,41 @@ struct FoldersView: View {
     }
 }
 
-// MARK: - Quick clean
+// MARK: - Clean Up
 
 struct CleanRoom: View {
     @Environment(AppModel.self) private var model
-    @State private var expanded: Set<String> = []
     @State private var confirmEmpty = false
 
     var body: some View {
         VStack(spacing: 0) {
-            RoomHeader(room: .clean, subtitle: "Leftovers that are safe to remove. Nothing is deleted until you review") {
-                if model.cleanLoading { ProgressView().controlSize(.small) }
-                Button { model.refreshClean() } label: { Image(systemName: "arrow.clockwise") }
-                    .help("Look again")
+            RoomHeader(room: .clean, subtitle: "Leftovers that are safe to remove. Nothing is deleted until you review it") {
+                if model.cleanLoading { ProgressView().controlSize(.mini) }
+                Button("Look Again") { model.refreshClean() }
+                    .buttonStyle(ActionButtonStyle())
                     .disabled(model.cleanLoading)
                 Button("Add All Safe") { model.stageSmart(review: false) }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
                     .disabled(model.smartBytes == 0)
+                    .opacity(model.smartBytes == 0 ? 0.5 : 1)
                     .help("Adds caches, logs, build files and installers. Leaves out project dependencies, archives and old downloads, which you should look at yourself.")
             }
-            List {
-                HStack(spacing: 12) {
-                    icon("trash", .secondary)
-                    VStack(alignment: .leading) {
-                        Text("Trash").font(.headline)
-                        Text("Moving things to the Trash frees no space until you empty it").font(.caption).foregroundStyle(.secondary)
+            RowList {
+                HoverRow(height: 46) {
+                    Color.clear.frame(width: 12, height: 1)
+                    Image(systemName: "trash").font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20)
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text("Trash").font(.system(size: 13, weight: .medium))
+                        Text("Moving things to the Trash frees no space until you empty it").font(.system(size: 12)).foregroundStyle(.secondary)
                     }
+                    .lineLimit(1)
                     Spacer()
-                    Text(model.trashSize.map(fmt) ?? "Hidden").monospacedDigit().foregroundStyle(.secondary)
-                    Button("Empty Trash", role: .destructive) { confirmEmpty = true }
+                    Text(model.trashSize.map(fmt) ?? "Hidden").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+                    Button("Empty") { confirmEmpty = true }.buttonStyle(ActionButtonStyle(color: Theme.warn))
+                        .frame(width: 62, alignment: .trailing)
                 }
-                .padding(.vertical, 6)
-
-                ForEach(Cleaners.all) { cat in
-                    let items = model.cleanResults[cat.id] ?? []
-                    let total = items.reduce(Int64(0)) { $0 + $1.size }
-                    let stagedAll = !items.isEmpty && items.allSatisfy { model.isQueued($0.url.path) || model.isCovered($0.url.path) }
-                    DisclosureGroup(isExpanded: Binding(get: { expanded.contains(cat.id) },
-                                                        set: { if $0 { expanded.insert(cat.id) } else { expanded.remove(cat.id) } })) {
-                        ForEach(items.prefix(200)) { i in
-                            HStack {
-                                FileIcon(path: i.url.path)
-                                Text(i.name).lineLimit(1).truncationMode(.middle)
-                                Spacer()
-                                Text(fmt(i.size)).monospacedDigit().foregroundStyle(.secondary)
-                                StageButton(path: i.url.path, name: i.name, size: i.size, source: cat.title)
-                            }
-                            .contextMenu { Button("Reveal in Finder") { reveal(i.url.path) } }
-                        }
-                    } label: {
-                        HStack(spacing: 12) {
-                            icon(cat.icon, .secondary)
-                            VStack(alignment: .leading) {
-                                Text(cat.title).font(.headline)
-                                Text(cat.detail).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Spacer()
-                            if model.cleanLoading && model.cleanResults[cat.id] == nil {
-                                ProgressView().controlSize(.small)
-                            } else {
-                                Text(items.isEmpty ? "Nothing" : fmt(total)).monospacedDigit()
-                                    .foregroundStyle(items.isEmpty ? .secondary : .primary)
-                            }
-                            Button(stagedAll ? "Added" : "Add All") {
-                                if stagedAll { items.forEach { model.unstage($0.url.path) } }
-                                else { items.forEach { model.stage(path: $0.url.path, name: $0.name, size: $0.size, source: cat.title) } }
-                            }
-                            .disabled(items.isEmpty)
-                            .tint(stagedAll ? Theme.good : nil)
-                        }
-                        .padding(.vertical, 6)
-                    }
-                }
-                Color.clear.frame(height: 80).listRowSeparator(.hidden)
+                ForEach(Cleaners.all) { category($0) }
             }
-            .listStyle(.inset)
-                .scrollContentBackground(.hidden)
         }
         .onAppear { if model.cleanResults.isEmpty { model.refreshClean() } }
         .confirmationDialog("Empty the Trash?", isPresented: $confirmEmpty) {
@@ -399,8 +328,60 @@ struct CleanRoom: View {
         }
     }
 
-    func icon(_ name: String, _ c: Color) -> some View {
-        Image(systemName: name).foregroundStyle(c).font(.title3).frame(width: 30)
+    @ViewBuilder
+    func category(_ cat: CleanCategory) -> some View {
+        let items = model.cleanResults[cat.id] ?? []
+        let total = items.reduce(Int64(0)) { $0 + $1.size }
+        let stagedAll = !items.isEmpty && items.allSatisfy { model.isQueued($0.url.path) || model.isCovered($0.url.path) }
+        let open = model.cleanExpanded.contains(cat.id) && !items.isEmpty
+
+        Button {
+            if open { model.cleanExpanded.remove(cat.id) } else { model.cleanExpanded.insert(cat.id) }
+        } label: {
+            HoverRow(height: 46) {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(items.isEmpty ? Color.clear : Color.secondary)
+                    .rotationEffect(.degrees(open ? 90 : 0))
+                    .frame(width: 12)
+                Image(systemName: cat.icon).font(.system(size: 13)).foregroundStyle(.secondary).frame(width: 20)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(cat.title).font(.system(size: 13, weight: .medium))
+                    Text(cat.detail).font(.system(size: 12)).foregroundStyle(.secondary)
+                }
+                .lineLimit(1)
+                Spacer(minLength: 12)
+                if model.cleanLoading && model.cleanResults[cat.id] == nil {
+                    ProgressView().controlSize(.mini)
+                } else {
+                    Text(items.isEmpty ? "Nothing" : fmt(total)).font(.system(size: 13).monospacedDigit())
+                        .foregroundStyle(items.isEmpty ? .secondary : .primary)
+                }
+                Button(stagedAll ? "Added" : "Add All") {
+                    if stagedAll { items.forEach { model.unstage($0.url.path) } }
+                    else { items.forEach { model.stage(path: $0.url.path, name: $0.name, size: $0.size, source: cat.title) } }
+                }
+                .buttonStyle(ActionButtonStyle(color: stagedAll ? Theme.good : .primary))
+                .disabled(items.isEmpty)
+                .opacity(items.isEmpty ? 0 : 1)
+                .frame(width: 62, alignment: .trailing)
+            }
+        }
+        .buttonStyle(.plain)
+
+        if open {
+            ForEach(items.prefix(200)) { i in
+                HoverRow(height: 34) {
+                    Color.clear.frame(width: 32, height: 1)
+                    FileIcon(path: i.url.path, size: 16)
+                    Text(i.name).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
+                    Spacer()
+                    Text(fmt(i.size)).font(.system(size: 12.5).monospacedDigit()).foregroundStyle(.secondary)
+                    StageButton(path: i.url.path, name: i.name, size: i.size, source: cat.title)
+                }
+                .contextMenu { Button("Reveal in Finder") { reveal(i.url.path) } }
+            }
+        }
     }
 }
 
@@ -409,86 +390,84 @@ struct CleanRoom: View {
 struct LargeFilesView: View {
     @Environment(AppModel.self) private var model
     @State private var threshold: Int64 = 100_000_000
+    @State private var stale = false
+    @State private var files: [FileNode] = []
+
+    var key: String { "\(model.treeVersion)-\(threshold)-\(stale)" }
 
     var body: some View {
-        let _ = model.treeVersion
         VStack(spacing: 0) {
-            HStack {
-                Picker("At least", selection: $threshold) {
-                    Text("50 MB").tag(Int64(50_000_000))
-                    Text("100 MB").tag(Int64(100_000_000))
-                    Text("500 MB").tag(Int64(500_000_000))
-                    Text("1 GB").tag(Int64(1_000_000_000))
-                }
-                .frame(width: 170)
-                Spacer()
-            }
-            .padding(.horizontal, 32)
-            .padding(.bottom, 8)
-            if let root = model.root {
-                let files: [FileNode] = {
-                    var out: [FileNode] = []
-                    root.files(atLeast: threshold, into: &out)
-                    return out.sorted { $0.size > $1.size }
-                }()
-                if files.isEmpty {
-                    ContentUnavailableView("No files that big", systemImage: "checkmark.seal", description: Text("Try a smaller size."))
-                } else {
-                    HStack {
-                        Text("\(files.count) files · \(fmt(files.reduce(0) { $0 + $1.size }))").foregroundStyle(.secondary)
-                        Spacer()
-                    }
-                    .padding(.horizontal, 32)
-                    List(files.prefix(500)) { f in
-                        HStack(spacing: 10) {
-                            FileIcon(path: f.path, size: 26)
-                            VStack(alignment: .leading, spacing: 1) {
-                                HStack(spacing: 6) {
-                                    Text(f.name).lineLimit(1).truncationMode(.middle)
-                                    if let a = Advisor.explain(f.path, name: f.name) { AdviceBadge(advice: a) }
-                                }
-                                Text(f.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                                    .font(.caption).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
-                            }
-                            Spacer()
-                            if let m = f.modified {
-                                Text(m.formatted(date: .abbreviated, time: .omitted)).font(.caption).foregroundStyle(.secondary)
-                            }
-                            Text(fmt(f.size)).monospacedDigit().frame(width: 80, alignment: .trailing)
-                            Button { reveal(f.path) } label: { Image(systemName: "magnifyingglass") }
-                                .buttonStyle(.borderless).help("Reveal in Finder")
-                            StageButton(path: f.path, name: f.name, size: f.size, source: "Large files")
-                        }
-                        .padding(.vertical, 2)
-                    }
-                    .listStyle(.inset)
-                .scrollContentBackground(.hidden)
-                    .safeAreaInset(edge: .bottom) { Color.clear.frame(height: 80) }
-                }
-            } else {
+            if model.root == nil {
                 EmptyScanPrompt()
+            } else {
+                HStack(spacing: 12) {
+                    TabStrip(selection: $threshold, tabs: [(50_000_000, "50 MB"), (100_000_000, "100 MB"), (500_000_000, "500 MB"), (1_000_000_000, "1 GB")])
+                    Toggle("Untouched for a year", isOn: $stale).toggleStyle(.checkbox)
+                        .help("Only files whose contents haven't changed in over a year")
+                    Spacer()
+                    Text("\(files.count) files · \(fmt(files.reduce(0) { $0 + $1.size }))").foregroundStyle(.secondary).monospacedDigit()
+                }
+                .font(.system(size: 12.5))
+                .padding(.leading, 22)
+                .padding(.trailing, 28)
+                .padding(.bottom, 8)
+
+                if files.isEmpty {
+                    Text("No files that big").font(.system(size: 13)).foregroundStyle(.secondary)
+                        .frame(maxWidth: .infinity, maxHeight: .infinity)
+                } else {
+                    RowList {
+                        ForEach(files.prefix(500)) { row($0) }
+                    }
+                }
             }
         }
+        .task(id: key) {
+            guard let root = model.root else { return }
+            let min = threshold
+            let cutoff = stale ? Date().addingTimeInterval(-365 * 86400) : nil
+            files = await Task.detached(priority: .userInitiated) {
+                var out: [FileNode] = []
+                root.files(atLeast: min, into: &out)
+                if let cutoff { out = out.filter { ($0.modified ?? .distantFuture) < cutoff } }
+                return out.sorted { $0.size > $1.size }
+            }.value
+        }
+    }
+
+    func row(_ f: FileNode) -> some View {
+        HoverRow(height: 42) {
+            FileIcon(path: f.path, size: 22)
+            VStack(alignment: .leading, spacing: 1) {
+                Text(f.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                Text(f.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+            }
+            Spacer(minLength: 12)
+            if let m = f.modified {
+                Text(m.formatted(.dateTime.month(.abbreviated).year())).font(.system(size: 12)).foregroundStyle(.secondary)
+            }
+            Text(fmt(f.size)).font(.system(size: 13).monospacedDigit()).frame(width: 74, alignment: .trailing)
+            StageButton(path: f.path, name: f.name, size: f.size, source: "Large files")
+        }
+        .contextMenu { Button("Reveal in Finder") { reveal(f.path) } }
     }
 }
 
 // MARK: - Full Disk Access
 
-struct FullDiskAccessCard: View {
+struct FullDiskAccessRow: View {
     @Environment(AppModel.self) private var model
 
     var body: some View {
-        HStack(spacing: 10) {
-            Glyph(symbol: "hand.raised", color: Theme.warm, size: 28)
+        HoverRow(height: 40) {
+            Image(systemName: "hand.raised").font(.system(size: 13)).foregroundStyle(Theme.warm).frame(width: 20)
             Text("Roomy can't see protected folders like the Trash and Mail, so some sizes look smaller.")
-                .font(.callout).foregroundStyle(.secondary)
-            Spacer()
-            Button("Allow…") { openFullDiskAccess() }.buttonStyle(PillButtonStyle(filled: true))
-            Button("Relaunch") { model.relaunch() }.buttonStyle(PillButtonStyle(color: .secondary))
+                .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+            Spacer(minLength: 8)
+            Button("Allow…") { openFullDiskAccess() }.buttonStyle(ActionButtonStyle())
+            Button("Relaunch") { model.relaunch() }.buttonStyle(ActionButtonStyle(color: .secondary))
                 .help("After switching Roomy on in Full Disk Access, relaunch so it takes effect")
         }
-        .padding(12)
-        .background(Theme.warm.opacity(0.08), in: RoundedRectangle(cornerRadius: Theme.radius, style: .continuous))
-        .overlay(RoundedRectangle(cornerRadius: Theme.radius, style: .continuous).strokeBorder(Theme.warm.opacity(0.3), lineWidth: 1))
     }
 }

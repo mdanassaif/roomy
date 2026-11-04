@@ -4,19 +4,19 @@ A native macOS app to see what's filling your disk, clean it up safely, keep you
 
 Built with SwiftUI. It's free, open source and runs entirely on your Mac.
 
-![Roomy Home with the floor plan](docs/roomy-floorplan.png)
 
 ## Features
 
-- **Your disk as a floor plan.** Every folder is a room sized by the space it takes, with its own folders drawn faintly inside. Click a room to walk in, right-click to add it to your clean list.
+- **A to-do list for your disk.** Home shows how much room is left, where it went, and what's worth doing about it, biggest first. Results open instantly and refresh quietly.
+- **Search everything.** Press ⌘K to find any folder or big file, or jump to a page.
+- **Duplicates and file types.** Find identical files by their contents, and see what kinds of files take up the room.
 - **Where it's heading.** Roomy notes free space a few times a day and tells you if the disk is holding steady or will be full in about three weeks. Home also shows what grew most since about a week ago.
-- **The notch.** On MacBooks with a notch, point at it to see free space, the forecast, CPU, memory, battery and Keep Awake. Drag a file or folder onto it to measure it, see if it's safe to remove, and add it to your clean list. Turn it off in Settings.
 - **One click to free up space.** Roomy finds caches, logs, build files and installers on its own and tells you how much you can free safely. Press *Free Up* on Home, check the list, done.
 - **Keep Awake.** Keep the Mac running for downloads, builds and remote sessions, with the lid closed too (this used to be a separate app, Simmer). Turn it on from the menu bar or the Keep Awake page, for good or for 30 minutes to 8 hours. It turns itself off on low battery, when the Mac runs hot with the lid closed, and when you quit Roomy.
 - **Every folder explains itself.** Badges like *Safe to remove*, *Rebuilds itself*, *Check first* and *Keep*, with a one-line note on what `.npm`, `.cache`, `Library` or `node_modules` actually are.
 - **Undo.** Changed your mind after cleaning? Press Undo (⌘Z) and everything goes back where it was.
 - **Cleanup queue, not a delete button.** Stage things from any screen. A bar floats over the app showing how much space you'll free and what your free space looks like afterwards. Review every item, then move the lot to the Trash.
-- **Storage.** Scan your Home folder, the whole disk or any folder. A floor plan and a sorted list show where the space went. Click to go inside a folder. Large Files and Changes (compare two scans) live here too.
+- **Storage.** Scan your Home folder, the whole disk or any folder. A sorted list shows where the space went. Click to go inside a folder. Large Files and Changes (compare two scans) live here too.
 - **Quick Clean.** App caches, logs, Xcode DerivedData, Archives and Device Support, simulator caches, npm/pnpm/bun/pip caches, `node_modules`, `.next` and `.turbo` folders, installers and old files in Downloads.
 - **Large files.** Every file over 50 MB, 100 MB, 500 MB or 1 GB.
 - **Applications.** Updates from each app's own Sparkle feed and from Homebrew. Login items and launch agents with a switch to turn them off. Uninstall an app together with its support files, caches and preferences.
