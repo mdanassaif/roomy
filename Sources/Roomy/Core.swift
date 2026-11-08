@@ -185,6 +185,18 @@ struct Scanner {
     static let keySet = Set(keys)
     // Firmlinks and other mounts that would double count when scanning "/"
     static let skip: Set<String> = ["/System/Volumes", "/Volumes", "/dev", "/net", "/home", "/Network"]
+    /// Other apps' private data. Opening these without Full Disk Access makes macOS ask again and again,
+    /// so the scan leaves them out until Roomy has that access.
+    static let otherAppsData: Set<String> = {
+        let h = NSHomeDirectory()
+        return Set(["/Library/Containers", "/Library/Group Containers", "/Library/Mail", "/Library/Messages",
+                    "/Library/Safari", "/Library/Calendars", "/Library/Reminders", "/Library/Mobile Documents",
+                    "/Library/Application Support/AddressBook", "/Library/Application Support/CallHistoryDB",
+                    "/Library/Application Support/com.apple.TCC", "/Library/Biome", "/Library/Suggestions",
+                    "/Library/Cookies", "/Library/HomeKit", "/Library/IdentityServices", "/Library/Metadata/CoreSpotlight",
+                    "/Pictures/Photos Library.photoslibrary", "/Library/Photos"].map { h + $0 })
+    }()
+    private let skipped: Set<String> = FullDiskAccess.granted ? Scanner.skip : Scanner.skip.union(Scanner.otherAppsData)
     static let keepThreshold: Int64 = 1_000_000
 
     let progress: ScanProgress
@@ -211,7 +223,7 @@ struct Scanner {
         for item in items {
             guard let rv = try? item.resourceValues(forKeys: Self.keySet), rv.isSymbolicLink != true else { continue }
             if rv.isDirectory == true {
-                if !Self.skip.contains(item.path) { dirs.append(item) }
+                if !skipped.contains(item.path) { dirs.append(item) }
                 continue
             }
             let size = Int64(rv.totalFileAllocatedSize ?? rv.fileAllocatedSize ?? 0)
@@ -355,5 +367,16 @@ final class SnapshotStore {
             return abs(row.delta) >= 1_000_000 ? row : nil
         }
         .sorted { abs($0.delta) > abs($1.delta) }
+    }
+}
+
+/// Whether Roomy has Full Disk Access. Checked by opening a file only that access can read,
+/// which fails quietly instead of putting up a prompt.
+enum FullDiskAccess {
+    static var granted: Bool {
+        let path = NSHomeDirectory() + "/Library/Application Support/com.apple.TCC/TCC.db"
+        guard let h = FileHandle(forReadingAtPath: path) else { return false }
+        try? h.close()
+        return true
     }
 }

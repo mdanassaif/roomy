@@ -23,13 +23,14 @@ struct HomeRoom: View {
         ScrollView {
             VStack(alignment: .leading, spacing: 0) {
                 RoomHeader(room: .home, subtitle: subtitle) { ScanControl() }
-                VStack(alignment: .leading, spacing: 26) {
-                    space.padding(.horizontal, 10)
+                VStack(alignment: .leading, spacing: 18) {
+                    tiles(list)
                     if !model.hasFullDiskAccess { FullDiskAccessRow() }
+                    Panel(title: "Where your space goes", icon: "chart.bar.xaxis") { space.padding(.horizontal, 10).padding(.vertical, 6) }
                     todo(list)
                     if let g = model.growth, !g.rows.isEmpty { grew(g) }
                 }
-                .padding(.horizontal, 18)
+                .padding(.horizontal, 28)
                 .padding(.top, 6)
                 .padding(.bottom, 90)
             }
@@ -41,26 +42,37 @@ struct HomeRoom: View {
         }
     }
 
+    // MARK: Summary
+
+    func tiles(_ list: [Suggestion]) -> some View {
+        let free = sizeParts(model.volume.free)
+        let check = list.filter { $0.id != "smart" && $0.id != "trash" }
+        let checkBytes = check.reduce(Int64(0)) { $0 + $1.bytes }
+        let grew = model.growth?.rows ?? []
+        let grewBytes = grew.reduce(Int64(0)) { $0 + $1.delta }
+        let readyParts = sizeParts(ready), checkParts = sizeParts(checkBytes), grewParts = sizeParts(grewBytes)
+        return HStack(spacing: 12) {
+            StatTile(icon: "internaldrive", label: "Free space", value: free.0, unit: free.1,
+                     caption: "of \(fmt(model.volume.total))" + (model.forecast.ready ? " · " + model.forecast.text : ""),
+                     tint: low ? Theme.warn : .primary) { model.storageTab = .folders; model.room = .storage }
+            StatTile(icon: "checkmark.seal", label: "Safe to clear", value: readyParts.0, unit: readyParts.1,
+                     caption: ready > 0 ? "Caches and Trash" : "Nothing right now",
+                     tint: ready > 0 ? Theme.good : .secondary) { model.room = .clean }
+            StatTile(icon: "eye", label: "Worth a look", value: checkParts.0, unit: checkParts.1,
+                     caption: check.isEmpty ? "Nothing to check" : "\(check.count) thing\(check.count == 1 ? "" : "s") to check first",
+                     tint: checkBytes > 0 ? Theme.warm : .secondary) { model.room = .clean }
+            StatTile(icon: "arrow.up.right", label: "Grew lately", value: grewParts.0, unit: grewParts.1,
+                     caption: grew.isEmpty ? "Shows after a few days of scans" : "\(grew.count) folder\(grew.count == 1 ? "" : "s") got bigger",
+                     tint: .primary) { model.storageTab = .changes; model.room = .storage }
+        }
+    }
+
     // MARK: Space
 
     var space: some View {
-        let free = sizeParts(model.volume.free)
-        let f = model.forecast
         let segments = folders
         let total = Double(max(model.volume.total, 1))
         return VStack(alignment: .leading, spacing: 12) {
-            HStack(alignment: .firstTextBaseline, spacing: 8) {
-                BigValue(value: free.0, unit: free.1, size: 34)
-                    .foregroundStyle(low ? Theme.warn : .primary)
-                Text("free of \(fmt(model.volume.total))").font(.system(size: 13)).foregroundStyle(.secondary)
-                Spacer()
-                if f.ready {
-                    Text(f.text)
-                        .font(.system(size: 12))
-                        .foregroundStyle(f.urgent ? Theme.warn : .secondary)
-                        .help("Roomy notes free space a few times a day and draws a line through the last three weeks.")
-                }
-            }
             StackBar(parts: segments.map { (Double($0.bytes) / total, $0.color) }, height: 8, gap: 2)
             HStack(spacing: 16) {
                 ForEach(segments) { s in
@@ -110,17 +122,12 @@ struct HomeRoom: View {
 
     @ViewBuilder
     func todo(_ list: [Suggestion]) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            HStack {
-                Eyebrow("Worth doing")
-                Spacer()
-                if model.smartBytes > 0 {
-                    Button("Free up \(fmt(model.smartBytes))") { model.stageSmart() }
-                        .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
-                }
+        Panel(title: "Worth doing", icon: "checklist", count: list.count) {
+            if model.smartBytes > 0 {
+                Button("Free up \(fmt(model.smartBytes))") { model.stageSmart() }
+                    .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
             }
-            .padding(.horizontal, 10)
-            .frame(minHeight: 28)
+        } content: {
 
             if list.isEmpty {
                 Text(model.cleanLoading ? "Checking your Mac…" : "All clear. Nothing to do.")
@@ -150,10 +157,11 @@ struct HomeRoom: View {
     // MARK: What grew
 
     func grew(_ g: (since: Date, rows: [Growth])) -> some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Eyebrow("Grew since \(g.since.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))")
-                .padding(.horizontal, 10)
-                .frame(minHeight: 28)
+        Panel(title: "Grew since \(g.since.formatted(.dateTime.weekday(.abbreviated).day().month(.abbreviated)))",
+              icon: "arrow.up.right", count: g.rows.count) {
+            Button("See changes") { model.storageTab = .changes; model.room = .storage }
+                .buttonStyle(ActionButtonStyle(color: .secondary))
+        } content: {
             ForEach(g.rows) { r in
                 Button {
                     if let n = model.root?.find(r.path) { model.open(n) } else { reveal(r.path) }
@@ -436,19 +444,37 @@ struct LargeFilesView: View {
     }
 
     func row(_ f: FileNode) -> some View {
-        HoverRow(height: 42) {
+        FileRow(file: f, source: "Large files", showDate: true)
+    }
+}
+
+/// One file with what it is, whether it's safe to remove, and where it lives.
+struct FileRow: View {
+    let file: FileNode
+    let source: String
+    var showDate = false
+
+    var body: some View {
+        let f = file
+        let advice = Advisor.explain(f.path, name: f.name)
+        let place = f.path.replacingOccurrences(of: NSHomeDirectory(), with: "~")
+        return HoverRow(height: 44) {
             FileIcon(path: f.path, size: 22)
-            VStack(alignment: .leading, spacing: 1) {
-                Text(f.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
-                Text(f.path.replacingOccurrences(of: NSHomeDirectory(), with: "~"))
-                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.head)
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 8) {
+                    Text(f.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                    if let advice { AdviceBadge(advice: advice) }
+                }
+                Text(advice.map { $0.text + "  ·  " + place } ?? place)
+                    .font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1).truncationMode(.middle)
             }
+            .help(place)
             Spacer(minLength: 12)
-            if let m = f.modified {
+            if showDate, let m = f.modified {
                 Text(m.formatted(.dateTime.month(.abbreviated).year())).font(.system(size: 12)).foregroundStyle(.secondary)
             }
             Text(fmt(f.size)).font(.system(size: 13).monospacedDigit()).frame(width: 74, alignment: .trailing)
-            StageButton(path: f.path, name: f.name, size: f.size, source: "Large files")
+            StageButton(path: f.path, name: f.name, size: f.size, source: source)
         }
         .contextMenu { Button("Reveal in Finder") { reveal(f.path) } }
     }
@@ -462,12 +488,82 @@ struct FullDiskAccessRow: View {
     var body: some View {
         HoverRow(height: 40) {
             Image(systemName: "hand.raised").font(.system(size: 13)).foregroundStyle(Theme.warm).frame(width: 20)
-            Text("Roomy can't see protected folders like the Trash and Mail, so some sizes look smaller.")
+            Text("Other apps' private data is left out so macOS doesn't keep asking. Allow Full Disk Access to include it.")
                 .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
             Spacer(minLength: 8)
             Button("Allow…") { openFullDiskAccess() }.buttonStyle(ActionButtonStyle())
             Button("Relaunch") { model.relaunch() }.buttonStyle(ActionButtonStyle(color: .secondary))
                 .help("After switching Roomy on in Full Disk Access, relaunch so it takes effect")
         }
+    }
+}
+
+// MARK: - Summary pieces
+
+/// One number that matters, what it means, and where clicking it takes you.
+struct StatTile: View {
+    let icon: String
+    let label: String
+    let value: String
+    let unit: String
+    let caption: String
+    var tint: Color = .primary
+    let action: () -> Void
+    @State private var hovered = false
+
+    var body: some View {
+        Button(action: action) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 6) {
+                    Image(systemName: icon).font(.system(size: 11, weight: .medium))
+                    Text(label).font(.system(size: 12, weight: .medium))
+                    Spacer(minLength: 0)
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).opacity(hovered ? 1 : 0)
+                }
+                .foregroundStyle(.secondary)
+                BigValue(value: value, unit: unit, size: 26).foregroundStyle(tint)
+                Text(caption).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+            }
+            .padding(14)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(hovered ? Color.primary.opacity(0.035) : Theme.card, in: RoundedRectangle(cornerRadius: 10, style: .continuous))
+            .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+    }
+}
+
+/// A titled group of rows with a count, so each part of the page says what it is.
+struct Panel<Trailing: View, Content: View>: View {
+    let title: String
+    let icon: String
+    var count: Int? = nil
+    @ViewBuilder var trailing: Trailing
+    @ViewBuilder var content: Content
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            HStack(spacing: 8) {
+                Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.secondary)
+                Text(title).font(.system(size: 13, weight: .semibold))
+                if let count { Text("\(count)").font(.system(size: 12).monospacedDigit()).foregroundStyle(.secondary) }
+                Spacer()
+                trailing
+            }
+            .frame(minHeight: 30)
+            .padding(.horizontal, 10)
+            .padding(.bottom, 4)
+            content
+        }
+        .padding(8)
+        .overlay(RoundedRectangle(cornerRadius: 10, style: .continuous).strokeBorder(Theme.line))
+    }
+}
+
+extension Panel where Trailing == EmptyView {
+    init(title: String, icon: String, count: Int? = nil, @ViewBuilder content: () -> Content) {
+        self.init(title: title, icon: icon, count: count, trailing: { EmptyView() }, content: content)
     }
 }

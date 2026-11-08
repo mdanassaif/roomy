@@ -235,15 +235,7 @@ struct TypesView: View {
                     .buttonStyle(.plain)
                     if isOpen {
                         ForEach(t.top) { f in
-                            HoverRow(height: 32) {
-                                Color.clear.frame(width: 32, height: 1)
-                                FileIcon(path: f.path, size: 16)
-                                Text(f.name).font(.system(size: 12.5)).lineLimit(1).truncationMode(.middle)
-                                Spacer(minLength: 12)
-                                Text(fmt(f.size)).font(.system(size: 12.5).monospacedDigit()).foregroundStyle(.secondary)
-                                StageButton(path: f.path, name: f.name, size: f.size, source: t.name)
-                            }
-                            .contextMenu { Button("Reveal in Finder") { reveal(f.path) } }
+                            FileRow(file: f, source: t.name).padding(.leading, 32)
                         }
                     }
                 }

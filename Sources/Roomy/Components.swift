@@ -24,7 +24,13 @@ struct StageButton: View {
     var body: some View {
         let queued = model.isQueued(path)
         let covered = !queued && model.isCovered(path)
-        if Safety.isProtected(path) {
+        if let keep = Advisor.explain(path, name: name), keep.verdict == .keep {
+            Image(systemName: "lock.fill")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+                .frame(width: 70)
+                .help("Keep: " + keep.text)
+        } else if Safety.isProtected(path) {
             Image(systemName: "lock.fill")
                 .font(.caption)
                 .foregroundStyle(.tertiary)

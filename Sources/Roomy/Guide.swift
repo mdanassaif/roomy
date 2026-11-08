@@ -98,7 +98,68 @@ enum Advisor {
         "mkv": Advice(verdict: .review, text: "Video."),
     ]
 
+    /// The Claude Code version in use, so older ones can be called safe.
+    private static let currentClaude: String? = {
+        let link = home + "/.local/bin/claude"
+        return (try? FileManager.default.destinationOfSymbolicLink(atPath: link)).map { ($0 as NSString).lastPathComponent }
+    }()
+
+    /// Rules for places that a folder's name alone doesn't explain. Checked before anything else.
+    private static func special(_ path: String, name: String) -> Advice? {
+        let h = home
+        if path.hasPrefix(h + "/.local/share/claude/versions/") {
+            return name == currentClaude
+                ? Advice(verdict: .keep, text: "The Claude Code version you're using.")
+                : Advice(verdict: .safe, text: "An older Claude Code version, no longer used.")
+        }
+        if path.hasPrefix(h + "/.local/share/claude/") { return Advice(verdict: .keep, text: "Part of Claude Code.") }
+        if path.hasPrefix(h + "/.claude/projects/") && name.hasSuffix(".jsonl") {
+            return Advice(verdict: .review, text: "A past Claude Code chat. Remove it if you won't resume that chat.")
+        }
+        if path.hasPrefix(h + "/Library/Application Support/Claude/vm_bundles") {
+            return Advice(verdict: .rebuilds, text: "The Claude app's Cowork machine. Downloaded again when you use Cowork.")
+        }
+        if path.hasPrefix(h + "/Library/Application Support/Claude/") { return Advice(verdict: .keep, text: "Part of the Claude app.") }
+        if path.hasPrefix(h + "/Library/Application Support/Google/GoogleUpdater/crx_cache") {
+            return Advice(verdict: .rebuilds, text: "Chrome's updater downloads. Fetched again when needed.")
+        }
+        if path.hasPrefix(h + "/Library/Developer/Xcode/CodingAssistant/") {
+            return Advice(verdict: .rebuilds, text: "Xcode's coding assistant. Downloaded again if you turn it on.")
+        }
+        if path.hasPrefix(h + "/.nvm/") || path.hasPrefix(h + "/.npm-global/") {
+            if path.hasPrefix(h + "/.nvm/versions/node/") && path.split(separator: "/").count == h.split(separator: "/").count + 4 {
+                return Advice(verdict: .review, text: "A Node.js version. Remove old ones with `nvm uninstall <version>`.")
+            }
+            return Advice(verdict: .keep, text: "Node.js or a command-line tool you installed.")
+        }
+        if path.hasPrefix(h + "/.vscode/extensions/") { return Advice(verdict: .keep, text: "A VS Code extension you have installed.") }
+        if path.hasPrefix(h + "/Library/Application Support/com.raycast.macos/") { return Advice(verdict: .keep, text: "Part of Raycast.") }
+        if path.contains("/com.apple.MobileAsset") || path.contains("/AssetData/") { return Advice(verdict: .keep, text: "A download macOS manages itself.") }
+        if path.contains(".xctoolchain/") { return Advice(verdict: .keep, text: "Part of Xcode.") }
+        if path.contains("/Photos Library.photoslibrary") { return Advice(verdict: .keep, text: "Your Photos library. Remove photos in the Photos app.") }
+        return nil
+    }
+
+    /// Folders that hold all sorts of things, so their advice doesn't pass down to what's inside.
+    private static let broad: Set<String> = ["", "Library", "Library/Application Support", "Desktop", "Documents", "Downloads",
+                                             "Movies", "Applications"]
+
+    /// What to do with this item: its own rule, or the nearest folder above it that has one.
     static func explain(_ path: String, name: String) -> Advice? {
+        if let a = special(path, name: name) ?? own(path, name: name) { return a }
+        var p = (path as NSString).deletingLastPathComponent
+        while p.count > 1 && p != home {
+            if let a = byName[(p as NSString).lastPathComponent] { return a }
+            if p.hasPrefix(home + "/") {
+                let rel = String(p.dropFirst(home.count + 1))
+                if !broad.contains(rel), let a = byHomePath[rel] { return a }
+            }
+            p = (p as NSString).deletingLastPathComponent
+        }
+        return nil
+    }
+
+    private static func own(_ path: String, name: String) -> Advice? {
         if path == "/System" || path.hasPrefix("/System/") { return Advice(verdict: .keep, text: "macOS itself.") }
         if path == "/private/var/vm" { return Advice(verdict: .keep, text: "Swap and sleep files managed by macOS.") }
         if path == "/Applications" { return Advice(verdict: .review, text: "Your apps. Uninstall them from Applications › All Apps.") }
@@ -121,13 +182,10 @@ struct AdviceBadge: View {
 
     var body: some View {
         HStack(spacing: 4) {
-            Image(systemName: advice.verdict.icon).font(.system(size: 9, weight: .bold))
-            if !compact { Text(advice.verdict.label).font(.caption2.weight(.semibold)) }
+            Image(systemName: advice.verdict.icon).font(.system(size: 9, weight: .semibold))
+            if !compact { Text(advice.verdict.label).font(.system(size: 11, weight: .medium)) }
         }
         .foregroundStyle(advice.verdict.color)
-        .padding(.horizontal, 6)
-        .padding(.vertical, 2)
-        .background(advice.verdict.color.opacity(0.12), in: Capsule())
         .help(advice.text)
     }
 }

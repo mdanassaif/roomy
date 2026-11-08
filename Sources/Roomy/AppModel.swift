@@ -175,7 +175,8 @@ final class AppModel {
             let clean = CleanCache.load()
             DispatchQueue.main.async {
                 if let clean { self.cleanResults = clean.results }
-                if clean.map({ Date().timeIntervalSince($0.date) > 3600 }) ?? true { self.refreshClean() }
+                // Saved results are shown as they are; Roomy only looks again when you press Scan.
+                if clean == nil { self.refreshClean() }
                 guard let saved else {
                     self.startScan(NSHomeDirectory())
                     return
@@ -186,7 +187,6 @@ final class AppModel {
                 self.scanDate = saved.date
                 self.treeVersion += 1
                 self.updateInsights()
-                if Date().timeIntervalSince(saved.date) > 86400 { self.startScan(quietly: true) }
             }
         }
     }
@@ -358,6 +358,7 @@ final class AppModel {
                 self.treeVersion += 1
                 self.duplicates = nil
                 self.refreshVolume()
+                self.refreshClean()
                 self.updateInsights()
                 if self.autoSnapshot { self.snapshots.saveIfDue(from: node) { [weak self] in self?.updateInsights() } }
             }
@@ -494,10 +495,11 @@ final class AppModel {
         DispatchQueue.global(qos: .utility).async {
             let items = try? FileManager.default.contentsOfDirectory(at: Self.trashURL, includingPropertiesForKeys: nil)
             let size = items?.reduce(Int64(0)) { $0 + Sizer.size(of: $1) }
+            let full = FullDiskAccess.granted
             DispatchQueue.main.async {
                 if self.trashSize != size { self.trashSize = size }
                 if self.trashCount != items?.count ?? 0 { self.trashCount = items?.count ?? 0 }
-                if self.hasFullDiskAccess != (items != nil) { self.hasFullDiskAccess = items != nil }
+                if self.hasFullDiskAccess != full { self.hasFullDiskAccess = full }
             }
         }
     }

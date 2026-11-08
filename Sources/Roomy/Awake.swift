@@ -16,6 +16,8 @@ import IOKit.ps
 final class KeepAwake {
     private(set) var isOn = false
     private(set) var until: Date?
+    /// When the current timer started, for the time-left bar.
+    private(set) var startedAt: Date?
     /// True while lid sleep is disabled by us.
     private(set) var lidClosedActive = false
     private(set) var lidSetupDone = KeepAwake.sudoersInstalled()
@@ -59,6 +61,7 @@ final class KeepAwake {
         if lidSetupDone && !lidClosedActive { disableLidSleep() }
         isOn = true
         until = duration.map { Date().addingTimeInterval($0) }
+        startedAt = Date()
         hotStrikes = 0
         startChecks()
     }
@@ -70,6 +73,7 @@ final class KeepAwake {
         if lidClosedActive { restoreLidSleep() }
         isOn = false
         until = nil
+        startedAt = nil
         timer?.invalidate()
         timer = nil
         if let reason {
