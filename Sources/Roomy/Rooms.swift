@@ -189,6 +189,7 @@ struct StorageRoom: View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 0) {
             RoomHeader(room: .storage, subtitle: subtitle) { ScanControl() }
+            if !model.hasFullDiskAccess { FullDiskAccessRow().padding(.horizontal, 28).padding(.bottom, 12) }
             TabStrip(selection: $model.storageTab, tabs: StorageTab.allCases.map { ($0, $0.rawValue) })
                 .padding(.horizontal, 22)
                 .padding(.bottom, 10)
@@ -267,7 +268,10 @@ struct FoldersView: View {
                 HStack(spacing: 10) {
                     FileIcon(path: c.path, aggregate: c.isAggregate, size: 20)
                     VStack(alignment: .leading, spacing: 1) {
-                        Text(c.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                        HStack(spacing: 8) {
+                            Text(c.name).font(.system(size: 13)).lineLimit(1).truncationMode(.middle)
+                            if let advice { AdviceBadge(advice: advice) }
+                        }
                         if let advice {
                             Text(advice.text).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
                         }
@@ -300,7 +304,9 @@ struct CleanRoom: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            RoomHeader(room: .clean, subtitle: "Leftovers that are safe to remove. Nothing is deleted until you review it") {
+            RoomHeader(room: .clean, subtitle: model.smartBytes > 0
+                       ? "\(fmt(model.smartBytes)) of leftovers can go. Nothing is deleted until you review it"
+                       : "Leftovers that are safe to remove. Nothing is deleted until you review it") {
                 if model.cleanLoading { ProgressView().controlSize(.mini) }
                 Button("Look Again") { model.refreshClean() }
                     .buttonStyle(ActionButtonStyle())
@@ -321,11 +327,19 @@ struct CleanRoom: View {
                     }
                     .lineLimit(1)
                     Spacer()
-                    Text(model.trashSize.map(fmt) ?? "Hidden").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+                    Text(model.trashSize.map(fmt) ?? "Size needs access").font(.system(size: 13).monospacedDigit()).foregroundStyle(.secondary)
+                        .help("Roomy can still empty it by asking Finder")
                     Button("Empty") { confirmEmpty = true }.buttonStyle(ActionButtonStyle(color: Theme.warn))
                         .frame(width: 62, alignment: .trailing)
                 }
-                ForEach(Cleaners.all) { category($0) }
+                let found = Cleaners.all.filter { !(model.cleanResults[$0.id] ?? []).isEmpty || (model.cleanLoading && model.cleanResults[$0.id] == nil) }
+                let locked = model.hasFullDiskAccess ? [] : Cleaners.all.filter { Cleaners.needAccess.contains($0.id) }
+                let empty = Cleaners.all.filter { c in !found.contains { $0.id == c.id } && !locked.contains { $0.id == c.id } }
+                ForEach(found) { category($0) }
+                if !empty.isEmpty { note("checkmark", "Nothing to clear in " + list(empty)) }
+                if !locked.isEmpty {
+                    note("lock", list(locked) + " need Full Disk Access", action: ("Turn on…", { model.room = .home; model.showAccess = true }))
+                }
             }
         }
         .onAppear { if model.cleanResults.isEmpty { model.refreshClean() } }
@@ -333,6 +347,21 @@ struct CleanRoom: View {
             Button("Empty Trash", role: .destructive) { model.emptyTrash() }
         } message: {
             Text("Everything in the Trash will be permanently deleted.")
+        }
+    }
+
+    func list(_ cats: [CleanCategory]) -> String {
+        let names = cats.map(\.title)
+        return names.count <= 1 ? names.joined() : names.dropLast().joined(separator: ", ") + " and " + names.last!
+    }
+
+    func note(_ icon: String, _ text: String, action: (String, () -> Void)? = nil) -> some View {
+        HoverRow(height: 40) {
+            Color.clear.frame(width: 12, height: 1)
+            Image(systemName: icon).font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 20)
+            Text(text).font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(2)
+            Spacer(minLength: 8)
+            if let action { Button(action.0, action: action.1).buttonStyle(ActionButtonStyle()) }
         }
     }
 
@@ -482,18 +511,66 @@ struct FileRow: View {
 
 // MARK: - Full Disk Access
 
+/// Apple's one switch for apps that measure the whole disk. With it, macOS never asks about single folders.
+/// Shown as a full card until it's on or the user chooses to go without, then as one quiet line.
 struct FullDiskAccessRow: View {
     @Environment(AppModel.self) private var model
+    @State private var waiting = false
 
     var body: some View {
-        HoverRow(height: 40) {
-            Image(systemName: "hand.raised").font(.system(size: 13)).foregroundStyle(Theme.warm).frame(width: 20)
-            Text("Other apps' private data is left out so macOS doesn't keep asking. Allow Full Disk Access to include it.")
-                .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
-            Spacer(minLength: 8)
-            Button("Allow…") { openFullDiskAccess() }.buttonStyle(ActionButtonStyle())
-            Button("Relaunch") { model.relaunch() }.buttonStyle(ActionButtonStyle(color: .secondary))
-                .help("After switching Roomy on in Full Disk Access, relaunch so it takes effect")
+        if model.scanLimited && !model.showAccess {
+            HoverRow(height: 40) {
+                Image(systemName: "lock").font(.system(size: 12)).foregroundStyle(.secondary).frame(width: 20)
+                Text("Desktop, Documents, Downloads and other protected folders are left out.")
+                    .font(.system(size: 12.5)).foregroundStyle(.secondary).lineLimit(1)
+                Spacer(minLength: 8)
+                Button("Include them…") { model.showAccess = true }.buttonStyle(ActionButtonStyle())
+            }
+        } else {
+            card
+        }
+    }
+
+    var card: some View {
+        Panel(title: "Give Roomy Full Disk Access", icon: "lock.shield") {
+            EmptyView()
+        } content: {
+            VStack(alignment: .leading, spacing: 14) {
+                Text("macOS guards Desktop, Documents, Downloads, Photos and other apps' data, and asks about each one separately. Full Disk Access is Apple's single switch for apps that measure your disk. Turn it on once and macOS stops asking.")
+                    .font(.system(size: 12.5)).foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 8) {
+                    step(1, "Open Privacy & Security › Full Disk Access")
+                    step(2, "Switch Roomy on. If it isn't listed, click + and choose Roomy in Applications")
+                    step(3, "Come back here. Roomy notices and starts scanning")
+                }
+                HStack(spacing: 8) {
+                    Button("Open System Settings") { waiting = true; openFullDiskAccess() }
+                        .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
+                    if waiting {
+                        ProgressView().controlSize(.mini)
+                        Text("Waiting for the switch…").font(.system(size: 12)).foregroundStyle(.secondary)
+                    }
+                    Spacer()
+                    Button("Scan without it") { model.accessSettled(limited: true) }
+                        .buttonStyle(ActionButtonStyle(color: .secondary))
+                        .help("Leaves out every protected folder, so macOS never asks")
+                }
+            }
+            .padding(.horizontal, 10)
+            .padding(.bottom, 6)
+        }
+        .onReceive(Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()) { _ in
+            if FullDiskAccess.granted { model.accessSettled(limited: false) }
+        }
+    }
+
+    func step(_ n: Int, _ text: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 10) {
+            Text("\(n)").font(.system(size: 11, weight: .semibold).monospacedDigit())
+                .frame(width: 18, height: 18)
+                .background(Color.primary.opacity(0.07), in: Circle())
+            Text(text).font(.system(size: 12.5))
         }
     }
 }

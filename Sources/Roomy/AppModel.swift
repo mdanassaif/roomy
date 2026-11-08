@@ -326,7 +326,40 @@ final class AppModel {
     // MARK: Scan
 
     /// Results already on screen stay there until the new ones are ready. `quietly` runs at low priority.
+    /// Set when someone chose to scan without Full Disk Access, so Roomy stops asking them about it.
+    var scanLimited = UserDefaults.standard.bool(forKey: "scan.limited") {
+        didSet { UserDefaults.standard.set(scanLimited, forKey: "scan.limited") }
+    }
+    /// True while Roomy is waiting for Full Disk Access to be switched on.
+    var showAccess = false
+
+    /// Without Full Disk Access a scan of your files would set off one macOS prompt per folder,
+    /// so it waits for that access unless you've chosen to scan without it.
     func startScan(_ path: String? = nil, quietly: Bool = false) {
+        if !FullDiskAccess.granted && !scanLimited && !isPicked(path ?? scanTarget) {
+            if let path { scanTarget = path }
+            showAccess = true
+            return
+        }
+        runScan(path, quietly: quietly)
+    }
+
+    /// A folder chosen in the open panel is one macOS already let the user pick, so it never prompts.
+    private var pickedFolders: Set<String> = []
+    func scanPicked(_ path: String) { pickedFolders.insert(path); runScan(path) }
+    private func isPicked(_ path: String?) -> Bool { path.map(pickedFolders.contains) ?? false }
+
+    /// Called once access is on, or when someone chooses to go without it.
+    func accessSettled(limited: Bool) {
+        if limited { scanLimited = true }
+        hasFullDiskAccess = FullDiskAccess.granted
+        showAccess = false
+        cleanResults = [:]
+        refreshTrash()
+        runScan(nil)
+    }
+
+    private func runScan(_ path: String? = nil, quietly: Bool = false) {
         if let path { scanTarget = path }
         guard !scanning else { return }
         scanning = true
@@ -541,12 +574,13 @@ final class AppModel {
         cleanLoading = true
         refreshTrash()
         let cats = Cleaners.all
+        let full = FullDiskAccess.granted
         DispatchQueue.global(qos: .utility).async {
             var res: [String: [SizedItem]] = [:]
             let lock = NSLock()
             DispatchQueue.concurrentPerform(iterations: cats.count) { i in
                 let c = cats[i]
-                let items = c.resolve()
+                let items = (!full && Cleaners.needAccess.contains(c.id) ? [] : c.resolve())
                     .map { SizedItem(url: $0, size: Sizer.size(of: $0), name: c.name($0)) }
                     .filter { $0.size > 0 && !Safety.isProtected($0.url.path) }
                     .sorted { $0.size > $1.size }

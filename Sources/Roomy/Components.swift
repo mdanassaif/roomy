@@ -190,7 +190,7 @@ struct ScanControl: View {
         p.canChooseDirectories = true
         p.canChooseFiles = false
         p.prompt = "Scan"
-        if p.runModal() == .OK, let u = p.url { model.startScan(u.path) }
+        if p.runModal() == .OK, let u = p.url { model.scanPicked(u.path) }
     }
 }
 

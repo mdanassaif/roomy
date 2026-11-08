@@ -79,6 +79,9 @@ enum Cleaners {
         ]
     }
 
+    /// Categories that live in folders macOS guards. Without Full Disk Access they'd each put up a prompt.
+    static let needAccess: Set<String> = ["deps", "installers", "olddownloads"]
+
     static func findDeps() -> [URL] {
         let roots = ["Desktop", "Documents", "Developer", "Projects", "code", "dev", "src", "repos", "work", "Sites"]
             .map { home + "/" + $0 }.filter { fm.fileExists(atPath: $0) }
