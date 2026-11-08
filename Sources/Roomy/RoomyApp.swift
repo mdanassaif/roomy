@@ -342,55 +342,49 @@ struct MonitorView: View {
 
     // MARK: Processes
 
+    /// A fixed-height list. Menu bar windows don't grow after they open, so nothing here may change the panel's height.
     var details: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            Button {
-                withAnimation(.easeOut(duration: 0.15)) { showDetails.toggle() }
-            } label: {
-                HStack(spacing: 6) {
-                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
-                        .rotationEffect(.degrees(showDetails ? 90 : 0)).foregroundStyle(.secondary).frame(width: 12)
-                    Text("Busiest apps and open ports").font(.system(size: 12.5, weight: .medium))
-                    Spacer()
-                    if let top = mon.processes.first {
-                        Text(top.name).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
-                    }
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 4) {
+                ForEach(["Busiest apps", "Open ports"], id: \.self) { t in
+                    let on = (t == "Open ports") == showDetails
+                    Button(t) { showDetails = t == "Open ports" }
+                        .buttonStyle(ActionButtonStyle(color: on ? .primary : .secondary))
+                        .opacity(on ? 1 : 0.8)
                 }
-                .padding(.horizontal, 14).frame(height: 36)
-                .contentShape(Rectangle())
+                Spacer()
+                Text(showDetails ? "\(mon.ports.count) listening" : "CPU")
+                    .font(.system(size: 11)).foregroundStyle(.secondary)
             }
-            .buttonStyle(.plain)
-            if showDetails {
-                VStack(alignment: .leading, spacing: 4) {
+            VStack(alignment: .leading, spacing: 5) {
+                if showDetails {
+                    if mon.ports.isEmpty {
+                        Text("Nothing is listening").foregroundStyle(.secondary)
+                    }
+                    ForEach(mon.ports.prefix(5)) { p in
+                        HStack(spacing: 8) {
+                            Text(":" + (p.address.split(separator: ":").last.map(String.init) ?? "")).fontWeight(.semibold)
+                            Text(p.command).lineLimit(1)
+                            Spacer()
+                            Text("pid " + String(p.pid)).foregroundStyle(.secondary)
+                        }
+                    }
+                } else {
                     ForEach(mon.processes.prefix(5)) { p in
                         HStack(spacing: 8) {
-                            Text(p.name).lineLimit(1)
+                            Text(p.name).lineLimit(1).truncationMode(.middle)
                             Spacer()
                             Text(fmt(p.memKB * 1024)).foregroundStyle(.secondary)
-                            Text(String(format: "%.0f%%", p.cpu)).frame(width: 40, alignment: .trailing)
+                            Text(String(format: "%.0f%%", p.cpu)).frame(width: 36, alignment: .trailing)
                         }
-                    }
-                    if !mon.ports.isEmpty {
-                        Text("Listening ports").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.top, 6)
-                        ScrollView {
-                            VStack(spacing: 4) {
-                                ForEach(mon.ports) { p in
-                                    HStack(spacing: 8) {
-                                        Text(":" + (p.address.split(separator: ":").last.map(String.init) ?? "")).fontWeight(.semibold)
-                                        Text(p.command).lineLimit(1)
-                                        Spacer()
-                                        Text("pid \(p.pid)").foregroundStyle(.secondary)
-                                    }
-                                }
-                            }
-                        }
-                        .frame(maxHeight: 96)
                     }
                 }
-                .font(.system(size: 12).monospacedDigit())
-                .padding(.horizontal, 14).padding(.bottom, 10)
             }
+            .font(.system(size: 12).monospacedDigit())
+            .frame(height: 104, alignment: .top)
         }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
     }
 
     // MARK: Footer
