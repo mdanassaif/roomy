@@ -1,35 +1,41 @@
 # Roomy
 
-A native macOS app to see what's filling your disk, clean it up safely, keep your Mac awake (even with the lid closed), and keep an eye on it all from the menu bar.
+**See what's filling your Mac, clear it safely, and keep it awake when you need it.**
 
-Built with SwiftUI. It's free, open source and runs entirely on your Mac.
+Roomy is a small, native macOS app built with SwiftUI. It tells you where your disk space went, explains in plain words what each thing is and whether it's safe to remove, and never deletes anything you haven't reviewed. It also keeps your Mac awake for long downloads and builds, with the lid closed too, and puts it all in your menu bar.
 
-![Roomy Home](docs/roomy-home.png)
+Free, open source, and it runs entirely on your Mac.
 
+![Roomy's Home page with the menu bar panel open](docs/roomy-screenshot.png)
 
-## Features
+## What it does
 
-- **A to-do list for your disk.** Home shows how much room is left, where it went, and what's worth doing about it, biggest first. Results open instantly and refresh quietly.
-- **Search everything.** Press ⌘K to find any folder or big file, or jump to a page.
-- **Duplicates and file types.** Find identical files by their contents, and see what kinds of files take up the room.
-- **Where it's heading.** Roomy notes free space a few times a day and tells you if the disk is holding steady or will be full in about three weeks. Home also shows what grew most since about a week ago.
-- **One click to free up space.** Roomy finds caches, logs, build files and installers on its own and tells you how much you can free safely. Press *Free Up* on Home, check the list, done.
-- **Keep Awake.** Keep the Mac running for downloads, builds and remote sessions, with the lid closed too (this used to be a separate app, Simmer). Turn it on from the menu bar or the Keep Awake page, for good or for 30 minutes to 8 hours. It turns itself off on low battery, when the Mac runs hot with the lid closed, and when you quit Roomy.
-- **Every folder explains itself.** Badges like *Safe to remove*, *Rebuilds itself*, *Check first* and *Keep*, with a one-line note on what `.npm`, `.cache`, `Library` or `node_modules` actually are.
-- **Undo.** Changed your mind after cleaning? Press Undo (⌘Z) and everything goes back where it was.
-- **Cleanup queue, not a delete button.** Stage things from any screen. A bar floats over the app showing how much space you'll free and what your free space looks like afterwards. Review every item, then move the lot to the Trash.
-- **Storage.** Scan your Home folder, the whole disk or any folder. A sorted list shows where the space went. Click to go inside a folder. Large Files and Changes (compare two scans) live here too.
-- **Quick Clean.** App caches, logs, Xcode DerivedData, Archives and Device Support, simulator caches, npm/pnpm/bun/pip caches, `node_modules`, `.next` and `.turbo` folders, installers and old files in Downloads.
-- **Large files.** Every file over 50 MB, 100 MB, 500 MB or 1 GB.
-- **Applications.** Updates from each app's own Sparkle feed and from Homebrew. Login items and launch agents with a switch to turn them off. Uninstall an app together with its support files, caches and preferences.
-- **Menu bar.** Free space in the bar itself, and a cup while Keep Awake is on. Click it for the Keep Awake switch and timer, the drive, CPU, memory, battery and network, plus the busiest processes and listening ports.
-- **Changes.** Each scan keeps the shape of your folders. Scan again later, compare the two, and see what grew, shrank, is new or is gone.
-- **Light and dark.** Match the system, or pick one.
-- **Private by design.** Scanning, sizing and matching happen on your Mac. No account, no sync, no analytics. The only network calls are update checks, and only when you press *Check for Updates*.
+### Know where your space went
+- **Home at a glance.** Four numbers: free space, what's safe to clear, what's worth a look, and what grew lately. Click any of them to go straight there.
+- **Storage.** Browse your folders sorted by size, see the biggest single files, group them by type (videos, archives, installers…), find duplicates by their contents, and compare two scans to see what grew.
+- **Search.** Press ⌘K to find any folder or large file, or to jump to a page.
+- **Forecast.** Roomy notes your free space a few times a day and tells you whether it's holding steady or running out.
+
+### Clear it without worrying
+- **Every item explains itself.** Each folder and file is marked **Safe**, **Rebuilds itself**, **Check first** or **Keep**, with a one-line reason: `node_modules` comes back with `npm install`, `.next` rebuilds on the next build, a `.git` pack is your project's history.
+- **Keep means keep.** Things like git history, the tools you're using and macOS's own files have a lock instead of an Add button, so they can't be removed by accident.
+- **Clean Up.** Roomy finds app caches, logs, Xcode build data and device support files, simulator and package-manager caches, project dependencies, and old installers in Downloads.
+- **Review, then remove.** Add things from any page to a clean list. A bar shows how much you'll free. Check every item, then move them to the Trash. Changed your mind? Press ⌘Z.
+
+### Keep your Mac awake
+- Stay awake for 30 minutes to 8 hours, or until you turn it off. You can start it from the Keep Awake page or with one tap in the menu bar.
+- Works with the lid closed after a one-time setup.
+- It turns itself off when the timer ends, when the battery gets low, if the Mac runs hot with the lid closed, and when you quit Roomy.
+
+### From the menu bar
+Free space in the menu bar itself. Click it for Keep Awake, a shortcut to what's safe to clear, live CPU, memory, battery and network, the busiest apps and open ports.
+
+### Apps
+Check for app updates through each app's own update feed and Homebrew, turn login items and background helpers off, and uninstall an app together with its leftover files.
 
 ## Install
 
-Requirements: macOS 14 (Sonoma) or later, and Xcode or the Xcode Command Line Tools (`xcode-select --install`).
+You need macOS 14 (Sonoma) or later, plus Xcode or the Command Line Tools (`xcode-select --install`).
 
 ```bash
 git clone https://github.com/mdanassaif/roomy.git
@@ -37,56 +43,69 @@ cd roomy
 ./build.sh
 ```
 
-This builds `Roomy.app`, signs it locally and copies it to `/Applications`. Open it from Launchpad or Spotlight.
+`build.sh` builds Roomy, signs it, and installs it to `/Applications`. To update later, run `git pull && ./build.sh`.
 
-To update later:
+If you have an Apple Development or Developer ID certificate, the script signs with it. That way macOS remembers Roomy's permissions across updates. Without one, it signs locally, and macOS may ask for permissions again after each build.
 
-```bash
-git pull && ./build.sh
-```
+## Permissions
 
-### Recommended: Full Disk Access
+Roomy asks for one thing: **Full Disk Access**. It's Apple's single switch for apps that measure your disk. Without it, macOS guards Desktop, Documents, Downloads, Photos and other apps' data separately and asks about each one.
 
-Go to **System Settings → Privacy & Security → Full Disk Access** and add **Roomy**. It can then measure the Trash, Mail, Messages and other protected folders. Without it, Roomy still works, but some folders show up smaller and emptying the Trash goes through Finder.
+1. Open Roomy. A card on Home explains this and has an **Open System Settings** button.
+2. Under **Privacy & Security → Full Disk Access**, switch **Roomy** on. If it isn't listed, click **+** and choose Roomy in Applications.
+3. Come back to Roomy. It notices within a couple of seconds and starts scanning.
 
-### Optional: lid-closed mode
+Prefer not to? Choose **Scan without it**. Roomy then leaves every protected folder out, so macOS never pops up a prompt. You can include them later.
 
-Keep Awake works with the lid open right away. To keep it going with the lid closed, press **Set Up…** on the Keep Awake page once and enter your password. Roomy installs `/etc/sudoers.d/roomy-awake`, which lets it run only `pmset -a disablesleep 0` and `pmset -a disablesleep 1` without asking again. When Keep Awake turns off, lid sleep goes back to how it was. To remove the rule: `sudo rm /etc/sudoers.d/roomy-awake`.
+**Already switched on, but Roomy still asks?** macOS may remember an older copy of the app. Select Roomy in that list, click **−**, then add it again with **+**.
 
-## Quick start
-
-1. Open Roomy. It scans your files and finds what's safe to clean without being asked.
-2. Press **Free Up** on Home.
-3. Remove anything you want to keep, tick **Empty the Trash too** to get the space back straight away, then confirm.
-
-To dig deeper, open **Storage** and press **Add** on anything you don't need.
-
-Moving things to the Trash doesn't free space until the Trash is emptied.
+### Lid-closed mode (optional)
+Keep Awake works with the lid open right away. To keep it going with the lid closed, press **Set Up…** on the Keep Awake page and enter your password once. This adds `/etc/sudoers.d/roomy-awake`, which lets Roomy run exactly two commands without asking again: `pmset -a disablesleep 1` and `pmset -a disablesleep 0`. Nothing else. To undo it: `sudo rm /etc/sudoers.d/roomy-awake`.
 
 ## Safety
 
-- Nothing is deleted without going through the review sheet, and moves to the Trash can be undone.
-- By default, items go to the Trash, where you can put them back.
-- System locations (`/System`, `/usr`, your Home, Library, Desktop, Documents and so on) and Apple apps are protected and can't be staged.
+- Nothing is deleted without going through the review sheet.
+- Items go to the Trash first, and the last clean can be undone with ⌘Z.
+- System locations, your main folders (Home, Library, Desktop, Documents…) and Apple's apps are protected and can't be added.
+- Roomy scans only when you press **Scan**. It never rescans or clears anything on its own.
+
+## Privacy
+
+Scanning, sizing and duplicate matching all happen on your Mac. There's no account, no sync and no analytics. The only network requests are update checks for your apps, and only when you ask for them.
+
+## Shortcuts
+
+| Keys | Action |
+| --- | --- |
+| ⌘K | Search |
+| ⌘1 – ⌘5 | Home, Clean Up, Storage, Apps, Keep Awake |
+| ⌘R | Scan again |
+| ⌘[ | Up one folder in Storage |
+| ⌘Z | Undo the last clean |
 
 ## Project layout
 
 ```
 Sources/Roomy/
-  Core.swift        scanner, file tree, volume info, safety rules, snapshots
-  Services.swift    clean categories, apps & updates, startup items, system monitor
-  AppModel.swift    app state, cleanup queue, trash
-  Theme.swift       colors, cards, tiles, pills: the look
-  Components.swift  shared views, treemap
-  Guide.swift       plain-language explanations for known folders
-  Awake.swift       Keep Awake: sleep locks, lid-closed mode, safety checks
-  AwakeViews.swift  Keep Awake page, Home card, menu bar row
-  Rooms.swift       Home (insights + "Your Mac today"), Storage, Clean Up, Large Files
-  Rooms2.swift      Apps, Changes, review sheet, settings
-  RoomyApp.swift    app entry, window, menu bar
-build.sh            build + install script
+  RoomyApp.swift      app entry, window, sidebar, menu bar panel
+  AppModel.swift      app state, scanning, clean list, Trash
+  Core.swift          scanner, file tree, disk info, protected paths, Full Disk Access check
+  Cache.swift         saved scan and Clean Up results, so Roomy opens instantly
+  Guide.swift         plain-language advice: Safe, Rebuilds itself, Check first, Keep
+  Services.swift      Clean Up categories, apps and updates, login items, system monitor
+  Finder.swift        duplicates, file types, ⌘K search
+  Insights.swift      free-space forecast and what grew lately
+  Rooms.swift         Home, Storage, Clean Up, Large Files, Full Disk Access card
+  Rooms2.swift        Apps, Changes, review sheet, Settings
+  Awake.swift         Keep Awake: sleep locks, lid-closed mode, safety checks
+  AwakeViews.swift    Keep Awake page
+  Components.swift    shared rows, buttons and icons
+  Theme.swift         colors and type
+  DebugSnapshot.swift screenshots for checking the UI (ROOMY_SNAPSHOT)
+build.sh              build, sign and install
+makeicon.swift        draws the app icon
 ```
 
 ## License
 
-MIT
+MIT. See [LICENSE](LICENSE).
