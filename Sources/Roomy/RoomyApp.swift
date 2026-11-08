@@ -221,78 +221,191 @@ struct WindowTweaks: NSViewRepresentable {
 struct MonitorView: View {
     @Environment(AppModel.self) private var model
     @Environment(SystemMonitor.self) private var mon
+    @Environment(KeepAwake.self) private var awake
     @Environment(\.openWindow) private var openWindow
     @State private var showDetails = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            AwakeMenuRow()
-
+        VStack(alignment: .leading, spacing: 0) {
+            awakeSection.padding(14)
             Divider()
+            storage.padding(14)
+            Divider()
+            stats.padding(14)
+            Divider()
+            details
+            Divider()
+            footer.padding(.horizontal, 14).padding(.vertical, 10)
+        }
+        .frame(width: 340)
+        .background(Theme.canvas)
+        .tint(Theme.accent)
+        .onAppear { mon.start(); model.refreshVolume() }
+        .onDisappear { mon.stop() }
+    }
 
-            VStack(alignment: .leading, spacing: 6) {
-                HStack(alignment: .firstTextBaseline) {
-                    Text(fmt(model.volume.free)).font(.system(size: 22, weight: .semibold)).monospacedDigit()
-                    Text("free").foregroundStyle(.secondary)
-                    Spacer()
-                    Text("of \(fmt(model.volume.total))").font(.caption).foregroundStyle(.secondary)
+    // MARK: Keep Awake
+
+    var awakeSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 10) {
+                Image(systemName: awake.isOn ? "cup.and.heat.waves.fill" : "cup.and.saucer")
+                    .font(.system(size: 15))
+                    .foregroundStyle(awake.isOn ? Theme.good : Color.secondary)
+                    .frame(width: 22)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text("Keep Awake").font(.system(size: 13, weight: .semibold))
+                    TimelineView(.periodic(from: .now, by: 1)) { ctx in
+                        Text(awakeLine(ctx.date)).font(.system(size: 11.5).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+                    }
                 }
-                DiskBar(total: model.volume.total, used: model.volume.used, height: 6)
+                Spacer()
+                Toggle("", isOn: Binding(get: { awake.isOn }, set: { $0 ? awake.turnOn() : awake.turnOff() }))
+                    .toggleStyle(.switch).controlSize(.small).tint(Theme.good).labelsHidden()
             }
+            HStack(spacing: 5) {
+                ForEach([("30m", 1800.0), ("1h", 3600), ("2h", 7200), ("4h", 14400), ("8h", 28800)], id: \.0) { d in
+                    Button { awake.turnOn(for: d.1) } label: { Text(d.0).frame(maxWidth: .infinity) }
+                        .buttonStyle(ActionButtonStyle(color: .secondary))
+                }
+            }
+            .help("Stay awake for this long from now")
+            if let error = awake.lastError {
+                Text(error).font(.system(size: 11.5)).foregroundStyle(Theme.warn)
+            }
+        }
+    }
 
-            HStack(spacing: 0) {
-                stat("CPU", String(format: "%.0f%%", mon.cpu * 100))
-                stat("Memory", "\(Int(Double(mon.memUsed) / Double(max(mon.memTotal, 1)) * 100))%")
+    func awakeLine(_ now: Date) -> String {
+        guard awake.isOn else { return awake.lidSetupDone ? "Off · works with the lid closed" : "Off · keep the lid open" }
+        guard let until = awake.until else { return "On until you turn it off" }
+        let s = max(0, Int(until.timeIntervalSince(now))), h = s / 3600, m = (s % 3600) / 60
+        let left = h > 0 ? "\(h)h \(m)m" : m > 0 ? "\(m)m \(s % 60)s" : "\(s)s"
+        return "On · \(left) left, until \(until.formatted(date: .omitted, time: .shortened))"
+    }
+
+    // MARK: Storage
+
+    var storage: some View {
+        let free = sizeParts(model.volume.free)
+        let ready = model.smartBytes + (model.trashSize ?? 0)
+        let low = Double(model.volume.free) / Double(max(model.volume.total, 1)) < 0.1
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 5) {
+                BigValue(value: free.0, unit: free.1, size: 24).foregroundStyle(low ? Theme.warn : .primary)
+                Text("free").font(.system(size: 12.5)).foregroundStyle(.secondary)
+                Spacer()
+                Text("of \(fmt(model.volume.total))").font(.system(size: 11.5)).foregroundStyle(.secondary)
+            }
+            DiskBar(total: model.volume.total, used: model.volume.used, height: 6)
+            if ready > 0 {
+                Button {
+                    model.room = .clean; show()
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "checkmark.seal").foregroundStyle(Theme.good)
+                        Text("\(fmt(ready)) safe to clear")
+                        Spacer()
+                        Text("Clean Up").foregroundStyle(Theme.accent)
+                        Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold)).foregroundStyle(.secondary)
+                    }
+                    .font(.system(size: 12))
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+    }
+
+    // MARK: Stats
+
+    var stats: some View {
+        let mem = Double(mon.memUsed) / Double(max(mon.memTotal, 1))
+        return Grid(horizontalSpacing: 10, verticalSpacing: 10) {
+            GridRow {
+                Meter(label: "CPU", value: String(format: "%.0f%%", mon.cpu * 100), fraction: mon.cpu)
+                Meter(label: "Memory", value: "\(Int(mem * 100))%", fraction: mem,
+                      detail: "\(fmt(Int64(mon.memUsed))) of \(fmt(Int64(mon.memTotal)))")
+            }
+            GridRow {
                 if let b = mon.battery {
-                    stat("Battery", "\(b.level)%\(b.charging ? " ⚡︎" : "")")
+                    Meter(label: "Battery", value: "\(b.level)%", fraction: Double(b.level) / 100,
+                          detail: b.charging ? "Charging" : b.onAC ? "Plugged in" : "On battery",
+                          color: b.level <= 20 && !b.onAC ? Theme.warn : Theme.good)
+                } else {
+                    Meter(label: "Power", value: "Plugged in", fraction: nil)
                 }
-                stat("Network", "↓ \(rate(mon.rxRate))")
+                Meter(label: "Network", value: "↓ " + rate(mon.rxRate), fraction: nil, detail: "↑ " + rate(mon.txRate) + " up")
             }
+        }
+    }
 
-            DisclosureGroup("Processes and ports", isExpanded: $showDetails) {
-                VStack(alignment: .leading, spacing: 5) {
+    // MARK: Processes
+
+    var details: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Button {
+                withAnimation(.easeOut(duration: 0.15)) { showDetails.toggle() }
+            } label: {
+                HStack(spacing: 6) {
+                    Image(systemName: "chevron.right").font(.system(size: 9, weight: .semibold))
+                        .rotationEffect(.degrees(showDetails ? 90 : 0)).foregroundStyle(.secondary).frame(width: 12)
+                    Text("Busiest apps and open ports").font(.system(size: 12.5, weight: .medium))
+                    Spacer()
+                    if let top = mon.processes.first {
+                        Text(top.name).font(.system(size: 11.5)).foregroundStyle(.secondary).lineLimit(1)
+                    }
+                }
+                .padding(.horizontal, 14).frame(height: 36)
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            if showDetails {
+                VStack(alignment: .leading, spacing: 4) {
                     ForEach(mon.processes.prefix(5)) { p in
-                        HStack {
+                        HStack(spacing: 8) {
                             Text(p.name).lineLimit(1)
                             Spacer()
-                            Text(fmt(p.memKB * 1024)).foregroundStyle(.secondary).font(.caption.monospacedDigit())
-                            Text(String(format: "%.0f%%", p.cpu)).font(.callout.monospacedDigit()).frame(width: 44, alignment: .trailing)
+                            Text(fmt(p.memKB * 1024)).foregroundStyle(.secondary)
+                            Text(String(format: "%.0f%%", p.cpu)).frame(width: 40, alignment: .trailing)
                         }
                     }
                     if !mon.ports.isEmpty {
-                        Divider().padding(.vertical, 2)
+                        Text("Listening ports").font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary).padding(.top, 6)
                         ScrollView {
                             VStack(spacing: 4) {
                                 ForEach(mon.ports) { p in
-                                    HStack {
-                                        Text(":" + (p.address.split(separator: ":").last.map(String.init) ?? ""))
-                                            .font(.callout.monospacedDigit().weight(.semibold))
+                                    HStack(spacing: 8) {
+                                        Text(":" + (p.address.split(separator: ":").last.map(String.init) ?? "")).fontWeight(.semibold)
                                         Text(p.command).lineLimit(1)
                                         Spacer()
-                                        Text("pid \(p.pid)").font(.caption).foregroundStyle(.secondary)
+                                        Text("pid \(p.pid)").foregroundStyle(.secondary)
                                     }
                                 }
                             }
                         }
-                        .frame(maxHeight: 100)
+                        .frame(maxHeight: 96)
                     }
                 }
-                .padding(.top, 6)
-            }
-            .font(.callout)
-
-            Divider()
-            HStack {
-                Button("Open Roomy") { show() }
-                Spacer()
-                Button("Quit") { NSApp.terminate(nil) }.buttonStyle(.borderless).foregroundStyle(.secondary)
+                .font(.system(size: 12).monospacedDigit())
+                .padding(.horizontal, 14).padding(.bottom, 10)
             }
         }
-        .padding(16)
-        .frame(width: 320)
-        .tint(Theme.accent)
-        .onAppear { mon.start(); model.refreshVolume() }
-        .onDisappear { mon.stop() }
+    }
+
+    // MARK: Footer
+
+    var footer: some View {
+        HStack {
+            Button { show() } label: {
+                HStack(spacing: 5) { Text("Open Roomy"); Image(systemName: "arrow.up.forward").font(.system(size: 9, weight: .semibold)) }
+            }
+            .buttonStyle(ActionButtonStyle(color: Theme.accent))
+            Spacer()
+            Button("Quit") { NSApp.terminate(nil) }
+                .buttonStyle(.plain).font(.system(size: 12)).foregroundStyle(.secondary)
+                .keyboardShortcut("q")
+        }
     }
 
     func show() {
@@ -300,13 +413,31 @@ struct MonitorView: View {
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    func stat(_ title: String, _ value: String) -> some View {
-        VStack(alignment: .leading, spacing: 2) {
-            Text(title).font(.caption).foregroundStyle(.secondary)
-            Text(value).font(.callout.monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
-        }
-        .frame(maxWidth: .infinity, alignment: .leading)
-    }
-
     func rate(_ bps: Double) -> String { fmt(Int64(bps)) + "/s" }
+}
+
+/// A small labelled reading with an optional bar underneath.
+struct Meter: View {
+    let label: String
+    let value: String
+    let fraction: Double?
+    var detail: String? = nil
+    var color: Color = Theme.accent
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 5) {
+            Text(label).font(.system(size: 11, weight: .medium)).foregroundStyle(.secondary)
+            Text(value).font(.system(size: 15, weight: .semibold).monospacedDigit()).lineLimit(1).minimumScaleFactor(0.7)
+            if let fraction {
+                StackBar(parts: [(min(max(fraction, 0), 1), fraction > 0.85 ? Theme.warn : color)], height: 4, gap: 0)
+            }
+            if let detail {
+                Text(detail).font(.system(size: 11).monospacedDigit()).foregroundStyle(.secondary).lineLimit(1)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity, minHeight: 84, maxHeight: .infinity, alignment: .topLeading)
+        .background(Theme.card, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 8, style: .continuous).strokeBorder(Theme.line))
+    }
 }
