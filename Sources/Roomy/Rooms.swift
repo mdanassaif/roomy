@@ -516,6 +516,8 @@ struct FileRow: View {
 struct FullDiskAccessRow: View {
     @Environment(AppModel.self) private var model
     @State private var waiting = false
+    @State private var waitedSince: Date?
+    @State private var now = Date()
 
     var body: some View {
         if model.scanLimited && !model.showAccess {
@@ -544,8 +546,17 @@ struct FullDiskAccessRow: View {
                     step(2, "Switch Roomy on. If it isn't listed, click + and choose Roomy in Applications")
                     step(3, "Come back here. Roomy notices and starts scanning")
                 }
+                if let since = waitedSince, now.timeIntervalSince(since) > 20 {
+                    Label {
+                        Text("Already switched on? macOS may remember an older copy of Roomy. In that list, select Roomy, click −, then click + and choose Roomy in Applications, and switch it on.")
+                            .fixedSize(horizontal: false, vertical: true)
+                    } icon: {
+                        Image(systemName: "info.circle")
+                    }
+                    .font(.system(size: 12)).foregroundStyle(Theme.warm)
+                }
                 HStack(spacing: 8) {
-                    Button("Open System Settings") { waiting = true; openFullDiskAccess() }
+                    Button("Open System Settings") { waiting = true; waitedSince = waitedSince ?? Date(); openFullDiskAccess() }
                         .buttonStyle(ActionButtonStyle(color: Theme.accent, filled: true))
                     if waiting {
                         ProgressView().controlSize(.mini)
@@ -561,6 +572,7 @@ struct FullDiskAccessRow: View {
             .padding(.bottom, 6)
         }
         .onReceive(Timer.publish(every: 1.5, on: .main, in: .common).autoconnect()) { _ in
+            now = Date()
             if FullDiskAccess.granted { model.accessSettled(limited: false) }
         }
     }
